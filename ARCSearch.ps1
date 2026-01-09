@@ -1153,5 +1153,7 @@ if ($Results.Count -eq 0) {
 # -----------------------------------------------------------------------------
 
 # Check for Updates
-$NewVersion = Get-UpdateInfo
-if ($NewVersion) { Show-UpdateBanner -NewVersion $NewVersion }
+if ($CurrentVersion -ne "vDEV") {
+    $NewVersion = Get-UpdateInfo
+    if ($NewVersion) { Show-UpdateBanner -NewVersion $NewVersion }
+}
