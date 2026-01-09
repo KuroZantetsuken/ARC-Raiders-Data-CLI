@@ -21,6 +21,7 @@ param (
 # CONSTANTS & CONFIGURATION
 # -----------------------------------------------------------------------------
 
+$CurrentVersion = "vDEV"
 $RepoRoot       = $PSScriptRoot
 $PathItems      = Join-Path $RepoRoot "arcraiders-data\items"
 $PathQuests     = Join-Path $RepoRoot "arcraiders-data\quests"
@@ -248,6 +249,95 @@ function Show-Card {
     
     # Bottom Border
     Write-BoxRow $Sym.Box.BL $Sym.Box.H $Sym.Box.BR $BorderColor $Width
+}
+
+function Get-UpdateInfo {
+    $CacheFile = Join-Path $RepoRoot ".update-cache"
+    $Now = Get-Date
+    
+    # 1. Check if we have a cached update notification
+    if (Test-Path $CacheFile) {
+        $Cache = Import-JsonFast $CacheFile
+        if ($Cache -and $Cache.LatestVersion -and $Cache.LatestVersion -ne $CurrentVersion) {
+            # Show cached update if last check was within 24h
+            if ($Cache.LastCheck -and ([DateTime]$Cache.LastCheck) -gt $Now.AddHours(-24)) {
+                return $Cache.LatestVersion
+            }
+        } elseif ($Cache -and $Cache.LastCheck -and ([DateTime]$Cache.LastCheck) -gt $Now.AddHours(-24)) {
+            return $null
+        }
+    }
+
+    # 2. Perform Check
+    try {
+        $Repo = "KuroZantetsuken/ARC-Raiders-Data-CLI"
+        $Url  = "https://api.github.com/repos/$Repo/releases/latest"
+        $Latest = Invoke-RestMethod -Uri $Url -ErrorAction SilentlyContinue
+        if ($Latest -and $Latest.tag_name -and $Latest.tag_name -ne $CurrentVersion) {
+            $NewVer = $Latest.tag_name
+            $CacheObj = @{ LastCheck = $Now.ToString("o"); LatestVersion = $NewVer }
+            $CacheObj | ConvertTo-Json | Set-Content $CacheFile
+            return $NewVer
+        } else {
+            $CacheObj = @{ LastCheck = $Now.ToString("o"); LatestVersion = $CurrentVersion }
+            $CacheObj | ConvertTo-Json | Set-Content $CacheFile
+        }
+    } catch {}
+    return $null
+}
+
+function Show-UpdateBanner {
+    param ($NewVersion)
+    $Lines = @(
+        "A new update is available: $NewVersion",
+        "Your current version: $CurrentVersion",
+        "",
+        "Run 'arc update' to install it automatically."
+    )
+    Show-Card -Title "UPDATE AVAILABLE" -Subtitle "Software Update" -Content $Lines -ThemeColor $Palette.Warning -BorderColor $Palette.Warning
+}
+
+function Update-ArcRaidersCLI {
+    Write-Ansi "Checking for updates..." $Palette.Accent
+    try {
+        $Repo = "KuroZantetsuken/ARC-Raiders-Data-CLI"
+        $Url  = "https://api.github.com/repos/$Repo/releases/latest"
+        $Latest = Invoke-RestMethod -Uri $Url -ErrorAction Stop
+        
+        if ($Latest.tag_name -eq $CurrentVersion) {
+            Write-Ansi "You are already on the latest version ($CurrentVersion)." $Palette.Success
+            return
+        }
+
+        $Asset = $Latest.assets | Where-Object { $_.name -like "*.zip" } | Select-Object -First 1
+        if (-not $Asset) {
+            Write-Ansi "No zip asset found in the latest release." $Palette.Error
+            return
+        }
+
+        Write-Ansi "Updating to $($Latest.tag_name)..." $Palette.Accent
+        $ZipPath = Join-Path $env:TEMP "arc-raiders-cli.zip"
+        
+        Write-Ansi "Downloading update..." $Palette.Subtext
+        Invoke-WebRequest -Uri $Asset.browser_download_url -OutFile $ZipPath -ErrorAction Stop
+        
+        Write-Ansi "Extracting files to $RepoRoot..." $Palette.Subtext
+        # We unzip to a temp folder first to avoid locking issues then copy
+        $TempExt = Join-Path $env:TEMP "arc_update_ext"
+        if (Test-Path $TempExt) { Remove-Item $TempExt -Recurse -Force }
+        Expand-Archive -Path $ZipPath -DestinationPath $TempExt -Force
+        
+        # Copy files over
+        Copy-Item -Path "$TempExt\*" -Destination $RepoRoot -Recurse -Force
+        
+        # Cleanup
+        Remove-Item $ZipPath -Force
+        Remove-Item $TempExt -Recurse -Force
+        
+        Write-Ansi "Update complete! Please restart the script." $Palette.Success
+    } catch {
+        Write-Ansi "Update failed: $($_.Exception.Message)" $Palette.Error
+    }
 }
 
 # -----------------------------------------------------------------------------
@@ -785,6 +875,7 @@ function Show-Help {
         "COMMANDS:",
         "  <Item Name>   Search for items, recipes, stash info",
         "  events        Show upcoming map event schedule",
+        "  update        Check and install software updates",
         "  <ARC Name>    Search ARC stats and drops",
         "  <Quest>       Search quest objectives",
         "",
@@ -807,6 +898,10 @@ function Show-Help {
     Write-BoxRow $Sym.Box.BL $Sym.Box.H $Sym.Box.BR $Palette.Border $W_Events
 }
 
+# Check for Updates
+$NewVersion = Get-UpdateInfo
+if ($NewVersion) { Show-UpdateBanner -NewVersion $NewVersion }
+
 # Check for Data Submodule
 if (-not (Test-Path $PathItems)) {
     Write-Ansi "`n[!] Data missing. Initializing submodule..." $Palette.Warning
@@ -823,6 +918,11 @@ if ([string]::IsNullOrWhiteSpace($Query)) {
     # Define widths for Help function scope
     $W_Events = 60
     Show-Help
+    exit
+}
+
+if ($Query -eq "update") {
+    Update-ArcRaidersCLI
     exit
 }
 

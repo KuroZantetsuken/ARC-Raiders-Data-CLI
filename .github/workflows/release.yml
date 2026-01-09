@@ -27,6 +27,11 @@ jobs:
       - name: Prepare Package
         run: |
           mkdir release
+          
+          # Inject version into ARCSearch.ps1
+          VERSION="v${{ github.run_number }}"
+          sed -i "s/\$CurrentVersion = \"vDEV\"/\$CurrentVersion = \"$VERSION\"/" ARCSearch.ps1
+          
           cp ARCSearch.ps1 release/
           cp Setup.ps1 release/
           
@@ -39,7 +44,7 @@ jobs:
           cp arcraiders-data/LICENSE release/arcraiders-data/
           
           cd arcraiders-data
-          find . -name "*.json" -exec cp --parents \{\} ../release/arcraiders-data/ \;
+          find . -name "*.json" -exec cp --parents {} ../release/arcraiders-data/ \;
           cd ..
           
           # Zip it up
@@ -51,12 +56,12 @@ jobs:
         id: last_commit
         run: echo "message=$(git log -1 --pretty=%s)" >> $GITHUB_OUTPUT
 
-      - name: Update Latest Release
+      - name: Create Versioned Release
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: latest
-          name: Latest Build
+          tag_name: v${{ github.run_number }}
+          name: Build v${{ github.run_number }}
           body: |
             ${{ steps.last_commit.outputs.message }}
             
