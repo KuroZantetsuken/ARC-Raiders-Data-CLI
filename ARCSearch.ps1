@@ -4,7 +4,7 @@
     Optimized for performance, maintainability, and standard terminal compatibility.
 
 .DESCRIPTION
-    Provides a command-line interface to search and view Items, Quests, Hideout Upgrades, Map Events, Bots, Projects, Skills, and Trades.
+    Provides a command-line interface to search and view Items, Quests, Hideout Upgrades, Map Events, ARCs, Projects, Skills, and Trades.
 
 .EXAMPLE
     .\ARCSearch.ps1 "Durable Cloth"
@@ -766,7 +766,7 @@ function Show-Help {
         "COMMANDS:",
         "  <Item Name>   Search for items, recipes, stash info",
         "  events        Show upcoming map event schedule",
-        "  <Bot Name>    Search bot stats and drops",
+        "  <ARC Name>    Search ARC stats and drops",
         "  <Quest>       Search quest objectives",
         "",
         "EXAMPLES:",
@@ -777,7 +777,8 @@ function Show-Help {
         "",
         "TIPS:",
         "  - Use 'arc' from anywhere by running Setup.ps1",
-        "  - Select results using number keys (0-9)"
+        "  - Select results using number keys (0-9)",
+        "  - No Git? Download ZIP from GitHub manually"
     )
 
     foreach ($Line in $HelpLines) {
@@ -846,7 +847,7 @@ if (Test-Path $PathHideout) {
 # 4. Search Bots
 foreach ($Bot in $Global:Data.Bots) {
     if ($Bot.name -like "*$Query*") {
-        $Results += [PSCustomObject]@{ Type="Bot"; Name=$Bot.name; Data=$Bot }
+        $Results += [PSCustomObject]@{ Type="ARC"; Name=$Bot.name; Data=$Bot }
     }
 }
 
@@ -871,7 +872,7 @@ if ($Results.Count -eq 0) {
     $T = $Results[0]
     switch ($T.Type) {
         "Item"    { Show-Item $T.Data }
-        "Bot"     { Show-Bot $T.Data }
+        "ARC"     { Show-Bot $T.Data }
         "Project" { Show-Project $T.Data }
         "Skill"   { Show-Skill $T.Data }
         "Quest"   { 
@@ -915,7 +916,7 @@ if ($Results.Count -eq 0) {
         $T = $Results[$Idx]
         switch ($T.Type) {
             "Item"    { Show-Item $T.Data }
-            "Bot"     { Show-Bot $T.Data }
+            "ARC"     { Show-Bot $T.Data }
             "Project" { Show-Project $T.Data }
             "Skill"   { Show-Skill $T.Data }
             "Quest"   { 
