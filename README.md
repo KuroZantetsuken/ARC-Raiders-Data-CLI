@@ -23,7 +23,7 @@ This utility helps players of ARC Raiders optimize their stash space by calculat
     ```
 
 3.  **Run Calculation Script**:
-    This script reads the source data, calculates stash savings, and populates the `data/mirror/items` directory.
+    This script reads the source data, calculates stash savings, and populates the `data/items` directory.
     ```bash
     python scripts/calculate_savings.py
     ```
@@ -64,7 +64,7 @@ If the game data changes or you want to fetch the latest updates from RaidTheory
 
 ## Project Structure
 
-- `external/arcraiders-data`: Submodule containing original game data.
-- `data/mirror/items`: Generated data with `stashSavings` added.
+- `arcraiders-data`: Submodule containing original game data.
+- `data/items`: Generated data with `stashSavings` added.
 - `scripts/calculate_savings.py`: Python script for processing data.
 - `scripts/arc-cli.ps1`: PowerShell CLI tool.

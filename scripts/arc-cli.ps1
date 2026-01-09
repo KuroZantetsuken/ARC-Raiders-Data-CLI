@@ -2,7 +2,7 @@ param (
     [string]$SearchTerm
 )
 
-$ItemsDir = Join-Path $PSScriptRoot "..\data\mirror\items"
+$ItemsDir = Join-Path $PSScriptRoot "..\data\items"
 
 if (-not (Test-Path $ItemsDir)) {
     Write-Host "Error: Items directory not found at $ItemsDir" -ForegroundColor Red

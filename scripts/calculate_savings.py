@@ -4,8 +4,8 @@ import glob
 import shutil
 
 # Paths relative to the project root
-SOURCE_DIR = os.path.join('external', 'arcraiders-data', 'items')
-DEST_DIR = os.path.join('data', 'mirror', 'items')
+SOURCE_DIR = os.path.join('arcraiders-data', 'items')
+DEST_DIR = os.path.join('data', 'items')
 
 def load_items(source_dir):
     items = {}
