@@ -501,7 +501,7 @@ function Show-Bot {
     $Lines = @()
     
     # Badges
-    $B1 = Get-FormattedBadge -Text $Bot.type -ColorKey "Text"
+    $B1 = Get-FormattedBadge -Text $Bot.type -ColorKey $ThColor
     $B2 = Get-FormattedBadge -Text $Bot.threat -ColorKey $ThColor
     $Lines += ($Indent + "$B1 $B2")
     
