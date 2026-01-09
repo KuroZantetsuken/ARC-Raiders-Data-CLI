@@ -49,56 +49,128 @@ function Show-Events {
     Write-Color "`n=== ARC Raiders Event Schedule ===" "Cyan"
     Write-Color "Current Time: $($LocalNow.ToString('g'))" "Gray"
     
+    # 1. Active Events Summary
+    Write-Color "`n[Active Now]" "Yellow"
+    $AnyActive = $false
+    
     foreach ($MapKey in $Schedule.PSObject.Properties.Name) {
         $MapName = if ($Maps.$MapKey.displayName) { $Maps.$MapKey.displayName } else { $MapKey }
         $MapSchedule = $Schedule.$MapKey
         
-        Write-Color "`n$MapName" "Yellow"
+        $ActiveMajor = $null
+        $ActiveMinor = $null
         
-        foreach ($Type in @("major", "minor")) {
-            if (-not $MapSchedule.$Type) { continue }
+        if ($MapSchedule.major."$CurrentUtcHour") {
+            $Id = $MapSchedule.major."$CurrentUtcHour"
+            $ActiveMajor = $EventTypes.$Id.displayName
+        }
+        
+        if ($MapSchedule.minor."$CurrentUtcHour") {
+            $Id = $MapSchedule.minor."$CurrentUtcHour"
+            $ActiveMinor = $EventTypes.$Id.displayName
+        }
+        
+        if ($ActiveMajor -or $ActiveMinor) {
+            $AnyActive = $true
+            $MajorStr = if ($ActiveMajor) { $ActiveMajor } else { "-" }
+            $MinorStr = if ($ActiveMinor) { $ActiveMinor } else { "-" }
             
-            $Events = $MapSchedule.$Type
-            $ActiveEventId = $null
-            $NextEventId = $null
-            $NextEventTime = $null
-            
-            # Find Active (starts at CurrentUtcHour)
-            if ($Events."$CurrentUtcHour") {
-                $ActiveEventId = $Events."$CurrentUtcHour"
-            }
-            
-            # Find Next
-            for ($h = 1; $h -le 24; $h++) {
-                $CheckHour = ($CurrentUtcHour + $h) % 24
-                # CheckHour needs to be string key
-                if ($Events."$CheckHour") {
-                    $NextEventId = $Events."$CheckHour"
-                    
-                    # Calculate local time
-                    $FutureUtc = $UtcNow.AddHours($h)
-                    # We want the exact hour of that future time
-                    $NextTimeUtc = Get-Date -Date $FutureUtc -Hour $CheckHour -Minute 0 -Second 0
-                    
-                    $NextEventTime = $NextTimeUtc.ToLocalTime()
-                    break
+            # Align output
+            # Map Name : Major, Minor
+            $MapStr = "$MapName".PadRight(20)
+            Write-Color "  $MapStr : $MajorStr (Major), $MinorStr (Minor)" "Green"
+        }
+    }
+    
+    if (-not $AnyActive) {
+        Write-Color "  No major/minor events currently active." "DarkGray"
+    }
+
+    # 2. Upcoming Schedule (Global per Event Type)
+    $UpcomingEvents = @()
+    
+    foreach ($EventKey in $EventTypes.PSObject.Properties.Name) {
+        if ($EventKey -eq "none") { continue }
+        $EventInfo = $EventTypes.$EventKey
+        if ($EventInfo.disabled) { continue }
+        
+        # Find next occurrence across all maps
+        $BestTimeSpan = [TimeSpan]::MaxValue
+        $NextOccurrence = $null
+        
+        foreach ($MapKey in $Schedule.PSObject.Properties.Name) {
+            $MapSchedule = $Schedule.$MapKey
+            # Check major and minor
+            foreach ($Cat in @("major", "minor")) {
+                if (-not $MapSchedule.$Cat) { continue }
+                $Sched = $MapSchedule.$Cat
+                
+                # Iterate 0..23 to find match
+                # 0 means starts NOW (Current hour). 
+                # Use 1..24 to find NEXT if current is ignored? 
+                # User said "even if an event is long into the future... next possible instance".
+                # If active now, showing "Active Now" in upcoming list is redundant?
+                # But user wants "next occurrence". If active, next is usually "Now".
+                # I'll include Now.
+                
+                for ($h = 0; $h -lt 24; $h++) {
+                    $CheckHour = ($CurrentUtcHour + $h) % 24
+                    if ($Sched."$CheckHour" -eq $EventKey) {
+                        # Found one
+                        if ($h -lt $BestTimeSpan.TotalHours) {
+                            $BestTimeSpan = [TimeSpan]::FromHours($h)
+                            
+                            # Exact time
+                            $FutureUtc = $UtcNow.AddHours($h)
+                            $ExactTimeUtc = Get-Date -Date $FutureUtc -Minute 0 -Second 0
+                            
+                            $NextOccurrence = @{
+                                Name = $EventInfo.displayName
+                                Map = if ($Maps.$MapKey.displayName) { $Maps.$MapKey.displayName } else { $MapKey }
+                                Time = $ExactTimeUtc.ToLocalTime()
+                                Category = $EventInfo.category
+                                HoursAway = $h
+                            }
+                        }
+                    }
                 }
             }
-            
-            # Display Active
-            if ($ActiveEventId) {
-                $EventName = $EventTypes.$ActiveEventId.displayName
-                Write-Color "  [Active $Type]: $EventName" "Green"
-            } else {
-                Write-Color "  [Active $Type]: None" "DarkGray"
+        }
+        
+        if ($NextOccurrence) {
+            $UpcomingEvents += [PSCustomObject]$NextOccurrence
+        }
+    }
+    
+    # Sort and Display
+    $UpcomingEvents = $UpcomingEvents | Sort-Object Time
+    
+    foreach ($Cat in @("major", "minor")) {
+        $Title = ($Cat.Substring(0,1).ToUpper() + $Cat.Substring(1))
+        Write-Color "`n[Upcoming $Title Events]" "Yellow"
+        
+        $List = $UpcomingEvents | Where-Object { $_.Category -eq $Cat }
+        if ($List) {
+            foreach ($Ev in $List) {
+                if ($Ev.HoursAway -eq 0) {
+                    # It's active now. Show as "Active Now"?
+                    # Or just show time?
+                    # Since we have "Active Now" section above, listing it here again confirms it's the "next" occurrence.
+                    # But user said "next upcoming one...". "Upcoming" usually excludes "Active".
+                    # However, if I exclude Active, and the next one is in 12 hours, I should show that?
+                    # "Launch Tower Loot" -> Active Now. Next one is tomorrow.
+                    # Showing "Active Now" is safer so user knows it's available.
+                    
+                    Write-Color "  ACTIVE NOW   - $($Ev.Name) ($($Ev.Map))" "Green"
+                } else {
+                    $TimeStr = $Ev.Time.ToString("HH:mm")
+                    $DayStr = if ($Ev.Time.Date -ne $LocalNow.Date) { " (Tomorrow)" } else { "" }
+                    
+                    Write-Color "  $($TimeStr)$($DayStr) - $($Ev.Name) ($($Ev.Map))" "White"
+                }
             }
-            
-            # Display Next
-            if ($NextEventId) {
-                $EventName = $EventTypes.$NextEventId.displayName
-                $TimeStr = $NextEventTime.ToString("HH:mm")
-                Write-Color "  [Next $Type]:   $EventName at $TimeStr" "White"
-            }
+        } else {
+            Write-Color "  None found in schedule." "DarkGray"
         }
     }
 }
