@@ -744,8 +744,65 @@ function Show-Events {
 # MAIN CONTROLLER
 # -----------------------------------------------------------------------------
 
+function Show-Help {
+    Write-BoxRow $Sym.Box.TL $Sym.Box.H $Sym.Box.TR $Palette.Border $W_Events
+    
+    $Title = " ARC SEARCH CLI "
+    $PadTotal = $W_Events - 2 - $Title.Length
+    $PadL = [math]::Floor($PadTotal / 2)
+    $PadR = [math]::Ceiling($PadTotal / 2)
+    
+    Write-Ansi $Sym.Box.V $Palette.Border -NoNewline
+    Write-Ansi ([string]::new(" ", $PadL)) -NoNewline
+    Write-Ansi $Title "7" -NoNewline
+    Write-Ansi ([string]::new(" ", $PadR)) -NoNewline
+    Write-Ansi $Sym.Box.V $Palette.Border
+
+    Write-BoxRow $Sym.Box.L $Sym.Box.H $Sym.Box.R $Palette.Border $W_Events
+
+    $HelpLines = @(
+        "Usage: arc <Query>",
+        "",
+        "COMMANDS:",
+        "  <Item Name>   Search for items, recipes, stash info",
+        "  events        Show upcoming map event schedule",
+        "  <Bot Name>    Search bot stats and drops",
+        "  <Quest>       Search quest objectives",
+        "",
+        "EXAMPLES:",
+        "  arc herbal    Search for 'Herbal Bandage'",
+        "  arc shield 0  Directly view result #0 for 'shield'",
+        "  arc events    Check map rotation",
+        "  arc heavy     List items matching 'Heavy'",
+        "",
+        "TIPS:",
+        "  - Use 'arc' from anywhere by running Setup.ps1",
+        "  - Select results using number keys (0-9)"
+    )
+
+    foreach ($Line in $HelpLines) {
+        Write-ContentRow -Text $Line -Width $W_Events -BorderColor $Palette.Border
+    }
+    
+    Write-BoxRow $Sym.Box.BL $Sym.Box.H $Sym.Box.BR $Palette.Border $W_Events
+}
+
+# Check for Data Submodule
+if (-not (Test-Path $PathItems)) {
+    Write-Ansi "`n[!] Data missing. Initializing submodule..." $Palette.Warning
+    try {
+        Start-Process git -ArgumentList "submodule update --init --recursive" -Wait -NoNewWindow
+        Write-Ansi "[+] Data initialized. Please re-run command.`n" $Palette.Success
+    } catch {
+        Write-Ansi "[!] Failed to initialize git submodule. Please run: git submodule update --init --recursive" $Palette.Error
+    }
+    exit
+}
+
 if ([string]::IsNullOrWhiteSpace($Query)) {
-    Write-Ansi "Usage: ARCSearch <Query>" $Palette.Warning
+    # Define widths for Help function scope
+    $W_Events = 60
+    Show-Help
     exit
 }
 

@@ -1,57 +1,94 @@
 # ARC Raiders Data CLI & Stash Optimizer
 
-This utility helps players of ARC Raiders optimize their stash space and quickly lookup game information like items, quests, hideouts, and active events.
+A powerful, fast, and easy-to-use CLI tool for **ARC Raiders** players. Instantly look up items, crafting recipes, quest objectives, and check the live map event schedule directly from your terminal.
+
+![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Platform](https://img.shields.io/badge/platform-Windows-blue)
 
 ## Features
 
-- **Stash Savings Calculation**: Automatically calculates the net stash space gained or lost by crafting items (on-the-fly).
-- **Universal Search**: Quickly find Items, Bots, Projects, Skills, Trades, Quests, and Hideouts using `ARCSearch`.
-- **Event Schedule**: View active and upcoming map events converted to your local time.
-- **Interactive CLI**: Fast result selection designed for quick access while playing.
+*   **Instant Search**: Zero-latency lookup for Items, Bots, Projects, Skills, and Quests.
+*   **Stash Optimizer**: Automatically calculates "Stash Savings" to tell you if crafting an item saves or costs space.
+*   **Event Schedule**: Live schedule of Map Events (Major & Minor) converted to your local time.
+*   **Trade Profit**: Shows if a trade is profitable based on market values.
+*   **Rich UI**: Beautiful terminal output with colors, badges, and card-based layouts.
 
-## Setup
+## Quick Start (Windows)
 
-1.  **Clone the Repository**:
-    ```bash
+1.  **Clone the Repo**:
+    ```powershell
     git clone https://github.com/KuroZantetsuken/ARC-Raiders-Data-CLI.git
     cd ARC-Raiders-Data-CLI
     ```
 
-2.  **Initialize Data Source**:
-    ```bash
-    git submodule update --init --recursive
-    ```
-
-3.  **Run the Tool**:
+2.  **Run Setup**:
     ```powershell
-    .\ARCSearch.ps1 "Herbal Bandage"
+    .\Setup.ps1
+    ```
+    *   Downloads the game data automatically.
+    *   Adds the tool to your system `PATH`.
+    *   Creates the `arc` shortcut command.
+
+3.  **Restart Terminal**: Close and reopen your terminal (or VS Code).
+
+4.  **You're Ready!**:
+    ```powershell
+    arc herbal     # Search for "Herbal Bandage"
+    arc events     # See the map schedule
     ```
 
-## Usage
+## Usage Guide
 
-### Search Items, Quests, Hideouts
-
+### 1. Searching
+Type `arc` followed by any keyword.
 ```powershell
-.\ARCSearch.ps1 "Herbal Bandage"
+arc heavy        # Lists results matching "Heavy"
+arc scrapper     # Shows bot stats for "Scrapper"
+arc "to earth"   # Finds quest "Down To Earth"
+```
+*   **Selection**: If multiple results are found, simply press `0`-`9` to view one instantly.
+*   **Direct Access**: You can also specify the index directly in the command.
+    ```powershell
+    arc shield 0     # Immediately opens the first result for "shield"
+    ```
+
+### 2. Event Schedule
+View the upcoming rotation for all maps.
+```powershell
+arc events
+```
+*   Shows the **Next Occurrence** of every event type.
+*   Times are in **Your Local Time**.
+*   **Yellow/Blue** highlights for different maps.
+
+### 3. Understanding Item Cards
+When you view an item, you'll see advanced stats:
+*   **Cost**: Total cost of ingredients vs. Item Value.
+*   **Space**: `(Green)` means crafting this saves stash slots. `(Red)` means it takes up more space.
+*   **Sold By**: Shows which traders sell it and if it's a good deal.
+
+### 4. Integration (PowerToys Run)
+Since `Setup.ps1` adds the folder to your PATH, you can use **PowerToys Run** (Alt+Space):
+1.  Type `> arc events`
+2.  Hit Enter to see the schedule immediately.
+
+## Updates
+Game data changes often. To update to the latest values:
+```powershell
+cd ARC-Raiders-Data-CLI
+git submodule update --remote
 ```
 
-If multiple results are found, simply press the corresponding number key (0-9) to select instantly.
-
-### Check Event Schedule
-
+## Uninstalling
+To cleanly remove the tool and all system changes:
 ```powershell
-.\ARCSearch.ps1 events
+.\Setup.ps1 -Uninstall
 ```
-Displays current and next major/minor events for all maps in your local time.
-
-### Examples
-
-- `.\ARCSearch.ps1 scrappy` -> Shows Scrappy hideout upgrades.
-- `.\ARCSearch.ps1 "down to earth"` -> Shows quest objectives and rewards.
-- `.\ARCSearch.ps1 heavy` -> Lists Heavy Ammo, Heavy Shield, etc.
-- `.\ARCSearch.ps1 celeste` -> Shows info about Celeste (Trader) or Celeste's Journal (Item).
+*   Removes the folder from your `PATH`.
+*   Deletes the `arc` alias.
+*   You can then safely delete the project folder.
 
 ## Project Structure
-
-- `arcraiders-data`: Submodule containing game data.
-- `ARCSearch.ps1`: The main CLI tool with built-in stash optimizer logic.
+*   `ARCSearch.ps1`: The core PowerShell engine.
+*   `arc.bat`: Wrapper for easy invocation.
+*   `arcraiders-data/`: Linked submodule containing raw JSON data.
