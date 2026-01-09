@@ -21,7 +21,7 @@ function Get-JsonContent {
 }
 
 function Write-Color {
-    param ($Text, $Color="White", $NoNewline=$false)
+    param ($Text, $Color="White", [switch]$NoNewline)
     if ($NoNewline) {
         Write-Host $Text -ForegroundColor $Color -NoNewline
     } else {
@@ -180,7 +180,6 @@ function Show-Events {
 function Show-Item {
     param ($Item)
     Write-Color "`n=== Item: $($Item.name.en) ===" "Cyan"
-    Write-Color "ID: $($Item.id)" "DarkGray"
     Write-Color "Type: $($Item.type)" "Gray"
     if ($Item.rarity) { Write-Color "Rarity: $($Item.rarity)" "White" }
     
@@ -205,7 +204,6 @@ function Show-Item {
 function Show-Quest {
     param ($Quest)
     Write-Color "`n=== Quest: $($Quest.name.en) ===" "Cyan"
-    Write-Color "ID: $($Quest.id)" "DarkGray"
     Write-Color "Trader: $($Quest.trader)" "Yellow"
     
     if ($Quest.description.en) {
@@ -232,7 +230,6 @@ function Show-Quest {
 function Show-Hideout {
     param ($Hideout)
     Write-Color "`n=== Hideout: $($Hideout.name.en) ===" "Cyan"
-    Write-Color "ID: $($Hideout.id)" "DarkGray"
     Write-Color "Max Level: $($Hideout.maxLevel)" "Gray"
     
     if ($Hideout.levels) {
