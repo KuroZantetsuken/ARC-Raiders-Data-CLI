@@ -6,6 +6,10 @@ on:
       - main
     tags:
       - 'v*'
+    paths:
+      - 'ARCSearch.ps1'
+      - 'Setup.ps1'
+      - 'arcraiders-data/**'
   workflow_dispatch:
 
 jobs:
@@ -18,13 +22,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+          fetch-depth: 0 # Fetch all history for commit messages
 
       - name: Prepare Package
         run: |
           mkdir release
           cp ARCSearch.ps1 release/
           cp Setup.ps1 release/
-          cp README.md release/
           
           # Recreate arc.bat in the package
           echo "@echo off" > release/arc.bat
@@ -33,7 +37,6 @@ jobs:
           # Copy JSON data and LICENSE from submodule
           mkdir -p release/arcraiders-data
           cp arcraiders-data/LICENSE release/arcraiders-data/
-          cp arcraiders-data/README.md release/arcraiders-data/
           
           cd arcraiders-data
           find . -name "*.json" -exec cp --parents \{\} ../release/arcraiders-data/ \;
@@ -44,6 +47,10 @@ jobs:
           zip -r ../arc-raiders-cli.zip .
           cd ..
 
+      - name: Get Last Commit Message
+        id: last_commit
+        run: echo "message=$(git log -1 --pretty=%s)" >> $GITHUB_OUTPUT
+
       - name: Update Latest Release
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v1
@@ -51,8 +58,9 @@ jobs:
           tag_name: latest
           name: Latest Build
           body: |
-            Automated build from the latest `main` branch.
-            Includes core CLI tool and current JSON game data.
+            ${{ steps.last_commit.outputs.message }}
+            
+            Automated build containing the core CLI tool and current JSON game data.
             
             **Attribution**:
             Data provided by [RaidTheory/arcraiders-data](https://github.com/RaidTheory/arcraiders-data) and [arctracker.io](https://arctracker.io).
@@ -68,7 +76,9 @@ jobs:
         with:
           name: Release ${{ github.ref_name }}
           body: |
-            Official Release ${{ github.ref_name }}
+            ${{ steps.last_commit.outputs.message }}
+            
+            Automated build containing the core CLI tool and current JSON game data.
             
             **Attribution**:
             Data provided by [RaidTheory/arcraiders-data](https://github.com/RaidTheory/arcraiders-data) and [arctracker.io](https://arctracker.io).
