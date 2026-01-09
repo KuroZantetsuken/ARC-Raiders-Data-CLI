@@ -63,6 +63,11 @@ $Palette = @{
     Rare        = $Theme.BrCyan
     Epic        = $Theme.BrMagenta
     Legendary   = $Theme.BrYellow
+    
+    # Skill Categories
+    CONDITIONING = $Theme.Green
+    MOBILITY     = $Theme.Yellow
+    SURVIVAL     = $Theme.Red
 }
 
 # Symbols
@@ -581,8 +586,11 @@ function Show-Skill {
     $Indent = " "
     $Lines = @()
     
+    $CatColorKey = $Skill.category
+    $CatColor = if ($Palette.ContainsKey($CatColorKey)) { $Palette[$CatColorKey] } else { $Palette.Accent }
+
     # Badge
-    $Lines += ($Indent + (Get-FormattedBadge -Text $Skill.category -ColorKey "Accent"))
+    $Lines += ($Indent + (Get-FormattedBadge -Text $Skill.category -ColorKey $CatColorKey))
     $Lines += ($Indent + $Skill.name.en.ToUpper())
     
     if ($Skill.description.en) {
@@ -597,7 +605,7 @@ function Show-Skill {
         $Lines += ($Indent + "MAX POINTS: $($Skill.maxPoints)")
     }
     
-    Show-Card -Title $null -Content $Lines -ThemeColor $Palette.Accent
+    Show-Card -Title $null -Content $Lines -ThemeColor $CatColor -BorderColor $CatColor
 }
 
 function Show-Events {
