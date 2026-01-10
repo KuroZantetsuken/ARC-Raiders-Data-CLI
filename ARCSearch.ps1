@@ -270,7 +270,7 @@ function Get-UpdateInfo {
 
     # 2. Perform Check
     try {
-        $Repo = "KuroZantetsuken/ARC-Raiders-Data-CLI"
+        $Repo = "KuroZantetsuken/ARC-Raiders-CLI"
         $Url  = "https://api.github.com/repos/$Repo/releases/latest"
         $Latest = Invoke-RestMethod -Uri $Url -ErrorAction SilentlyContinue
         if ($Latest -and $Latest.tag_name -and $Latest.tag_name -ne $CurrentVersion) {
@@ -300,7 +300,7 @@ function Show-UpdateBanner {
 function Update-ArcRaidersCLI {
     Write-Ansi "Checking for updates..." $Palette.Accent
     try {
-        $Repo = "KuroZantetsuken/ARC-Raiders-Data-CLI"
+        $Repo = "KuroZantetsuken/ARC-Raiders-CLI"
         $Url  = "https://api.github.com/repos/$Repo/releases/latest"
         $Latest = Invoke-RestMethod -Uri $Url -ErrorAction Stop
         
