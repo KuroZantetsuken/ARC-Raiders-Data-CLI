@@ -30,7 +30,7 @@ A command-line utility for looking up game data from ARC Raiders.
    git clone --recursive https://github.com/KuroZantetsuken/ARC-Raiders-CLI.git
    cd ARC-Raiders-CLI
    ```
-2. Run `.\Setup.ps1` to configure the environment.
+2. Run `.\install.bat` to configure the environment.
 
 ## Usage
 
