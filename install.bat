@@ -11,7 +11,7 @@ set "ScriptPath=%ScriptPath:~0,-1%"
 echo [*] Creating 'arc.bat' alias...
 (
     echo @echo off
-    echo powershell -ExecutionPolicy Bypass -File "%%~dp0ARCSearch.ps1" %%*
+    echo powershell -ExecutionPolicy Bypass -File "%%~dp0arc-raiders-cli.ps1" %%*
 ) > "%~dp0arc.bat"
 
 echo [*] Adding '%ScriptPath%' to User PATH...

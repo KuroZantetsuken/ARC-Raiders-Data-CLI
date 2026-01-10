@@ -1,15 +1,43 @@
 <#
 .SYNOPSIS
-    ARCSearch - ARC Raiders CLI Data Utility
-    Optimized for performance, maintainability, and standard terminal compatibility.
+    ARC Raiders CLI - A command-line utility for exploring ARC Raiders game data.
+    Provides quick access to items, quests, hideout modules, and more, powered by data from github.com/RaidTheory/arcraiders-data/.
 
 .DESCRIPTION
-    Provides a command-line interface to search and view Items, Quests, Hideout Upgrades, Map Events, ARCs, Projects, Skills, and Trades.
+    This tool provides a terminal-based interface to search and view the structured game data used by arctracker.io.
+    It supports searching for:
+    - Items (Stats, Recipes, Stash Space Delta, Costs, Values, etc.)
+    - Quests (Objectives, Traders)
+    - Hideout Workshops (Upgrades, Requirements)
+    - Map Events (Upcoming Schedule)
+    - ARCs (Threat levels, Weaknesses, Drops)
+    - Project Requirements
+    - Skill Nodes
 
 .EXAMPLE
-    .\ARCSearch.ps1 "Durable Cloth"
-    .\ARCSearch.ps1 "events"
-    .\ARCSearch.ps1 "Celeste"
+    arc "Cat Bed"
+    Search for an item and view its details.
+
+.EXAMPLE
+    arc cat 0
+    View the first result for 'cat'.
+
+.EXAMPLE
+    arc events
+    Show the next occurance for each event type.
+
+.EXAMPLE
+    arc update
+    Check and install updates.
+
+.EXAMPLE
+    arc
+    Display the help text.
+
+.LINK
+    https://github.com/KuroZantetsuken/ARC-Raiders-CLI
+    https://github.com/RaidTheory/arcraiders-data
+    https://arctracker.io
 #>
 
 param (
@@ -304,7 +332,7 @@ function Show-UpdateBanner {
         "",
         "Run 'arc update' to install it automatically."
     )
-    Show-Card -Title "UPDATE AVAILABLE" -Subtitle "Software Update" -Content $Lines -ThemeColor $Palette.Warning -BorderColor $Palette.Warning
+    Show-Card -Title "UPDATE AVAILABLE" -Subtitle "https://github.com/KuroZantetsuken/ARC-Raiders-CLI" -Content $Lines -ThemeColor $Palette.Warning -BorderColor $Palette.Warning
 }
 
 function Update-ArcRaidersCLI {
@@ -941,7 +969,7 @@ function Show-Events {
 function Show-Help {
     Write-BoxRow $Sym.Box.TL $Sym.Box.H $Sym.Box.TR $Palette.Border $W_Events
     
-    $Title = " ARC SEARCH CLI "
+    $Title = " ARC RAIDERS CLI "
     $PadTotal = $W_Events - 2 - $Title.Length
     $PadL = [math]::Floor($PadTotal / 2)
     $PadR = [math]::Ceiling($PadTotal / 2)
@@ -955,25 +983,25 @@ function Show-Help {
     Write-BoxRow $Sym.Box.L $Sym.Box.H $Sym.Box.R $Palette.Border $W_Events
 
     $HelpLines = @(
-        "Usage: arc <Query>",
+        "Usage: arc <Query> [Index]",
         "",
         "COMMANDS:",
-        "  <Item Name>   Search for items, recipes, stash info",
-        "  events        Show upcoming map event schedule",
-        "  update        Check and install software updates",
-        "  <ARC Name>    Search ARC stats and drops",
-        "  <Quest>       Search quest objectives",
+        "  update          Check and install updates",
+        "  events          Check event rotation",
+        "  <Query>         Search game data"
         "",
         "EXAMPLES:",
-        "  arc herbal    Search for 'Herbal Bandage'",
-        "  arc shield 0  Directly view result #0 for 'shield'",
-        "  arc events    Check map rotation",
-        "  arc heavy     List items matching 'Heavy'",
+        "  arc             Display this help text"
+        "  arc update      Check and install updates",
+        "  arc events      Check event rotation",
+        "  arc `"Cat Bed`"   Search for 'Cat Bed'",
+        "  arc cat 0       View the first result for 'cat'",
         "",
         "TIPS:",
-        "  - Use 'arc' from anywhere by running Setup.ps1",
+        "  - Use 'arc' from anywhere after running install.bat",
         "  - Select results using number keys (0-9)",
-        "  - No Git? Download ZIP from GitHub manually"
+        "      or optional index argument",
+        "  - Multi word queries must be in quotation marks"
     )
 
     foreach ($Line in $HelpLines) {

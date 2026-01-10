@@ -7,8 +7,9 @@ on:
     tags:
       - 'v*'
     paths:
-      - 'ARCSearch.ps1'
-      - 'Setup.ps1'
+      - 'arc-raiders-cli.ps1'
+      - 'install.bat'
+      - 'uninstall.bat'
       - 'arcraiders-data/**'
   workflow_dispatch:
 
@@ -28,12 +29,13 @@ jobs:
         run: |
           mkdir release
           
-          # Inject version into ARCSearch.ps1
+          # Inject version into arc-raiders-cli.ps1
           VERSION="v${{ github.run_number }}"
-          sed -i "s/\$CurrentVersion = \"vDEV\"/\$CurrentVersion = \"$VERSION\"/" ARCSearch.ps1
+          sed -i "s/\$CurrentVersion = \"vDEV\"/\$CurrentVersion = \"$VERSION\"/" arc-raiders-cli.ps1
           
-          cp ARCSearch.ps1 release/
-          cp setup.bat release/
+          cp arc-raiders-cli.ps1 release/
+          cp install.bat release/
+          cp uninstall.bat release/
           cp LICENSE release/
           
           # Copy JSON data and LICENSE from submodule
