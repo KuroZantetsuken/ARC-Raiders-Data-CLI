@@ -420,6 +420,19 @@ function Initialize-Data {
         # If directories look okay, we trust the cache (avoids recursive file scan)
         if (-not $NeedsRebuild) {
             $Global:Data = $Cache.Data
+
+            # Ensure collections are correctly unwrapped from cache
+            $Keys = @("Quests", "Hideout", "Bots", "Projects", "Skills", "Trades")
+            foreach ($Key in $Keys) {
+                if ($Global:Data.$Key -and $Global:Data.$Key.PSObject -and $Global:Data.$Key.PSObject.Properties['value']) {
+                    $Global:Data.$Key = $Global:Data.$Key.value
+                }
+            }
+            # For Items (Hashtable in fresh, PSCustomObject in cache)
+            if ($Global:Data.Items -and $Global:Data.Items.PSObject -and $Global:Data.Items.PSObject.Properties['value']) {
+                $Global:Data.Items = $Global:Data.Items.value
+            }
+
             $Global:DataLoaded = $true
         }
     }
@@ -647,6 +660,56 @@ function Show-Item {
             
             $Lines += ($Indent + "VALUE: $($Sym.Currency) $PVal $DiffStr")
         }
+    }
+
+    # Found In
+    $FoundInLines = @()
+    $LocSource = $Item.foundIn
+    
+    # Drops from Bots
+    $DroppingBots = @()
+    $BotData = if ($Global:Data.Bots.PSObject -and $Global:Data.Bots.PSObject.Properties['value']) { $Global:Data.Bots.value } else { $Global:Data.Bots }
+    if ($BotData) {
+        foreach ($Bot in $BotData) {
+            if ($Bot.drops -contains $Item.id) { $DroppingBots += $Bot.name }
+        }
+    }
+
+    # Rewards from Quests
+    $QuestRewards = @()
+    $QuestData = if ($Global:Data.Quests.PSObject -and $Global:Data.Quests.PSObject.Properties['value']) { $Global:Data.Quests.value } else { $Global:Data.Quests }
+    if ($QuestData) {
+        foreach ($Quest in $QuestData) {
+            if ($Quest.grantedItemIds -and ($Quest.grantedItemIds.itemId -contains $Item.id)) {
+                $QuestRewards += $Quest.name.en
+            }
+        }
+    }
+
+    if ($LocSource -and ($LocSource -ne "ARC" -or $DroppingBots.Count -eq 0)) {
+        $FoundInLines += ($Indent + " - $LocSource")
+    }
+
+    if ($DroppingBots.Count -gt 0) {
+        if ($DroppingBots.Count -gt 4) {
+            $FoundInLines += ($Indent + " - Various ARCs ($($DroppingBots.Count))")
+        } else {
+            foreach ($bn in $DroppingBots) { $FoundInLines += ($Indent + " - $bn (ARC)") }
+        }
+    }
+
+    if ($QuestRewards.Count -gt 0) {
+        if ($QuestRewards.Count -gt 3) {
+            $FoundInLines += ($Indent + " - Various Quests ($($QuestRewards.Count))")
+        } else {
+            foreach ($qn in $QuestRewards) { $FoundInLines += ($Indent + " - $qn (Quest)") }
+        }
+    }
+
+    if ($FoundInLines.Count -gt 0) {
+        $Lines += "---"
+        $Lines += ($Indent + "FOUND IN:")
+        $Lines += $FoundInLines
     }
 
     # Sold By (Trades)
