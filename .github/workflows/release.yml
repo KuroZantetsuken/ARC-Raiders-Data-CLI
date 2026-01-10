@@ -22,7 +22,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-          fetch-depth: 0 # Fetch all history for commit messages
+          fetch-depth: 0
 
       - name: Prepare Package
         run: |
@@ -35,10 +35,6 @@ jobs:
           cp ARCSearch.ps1 release/
           cp setup.bat release/
           cp LICENSE release/
-          
-          # Recreate arc.bat in the package
-          echo "@echo off" > release/arc.bat
-          echo "powershell -ExecutionPolicy Bypass -File \"%~dp0ARCSearch.ps1\" %*" >> release/arc.bat
           
           # Copy JSON data and LICENSE from submodule
           mkdir -p release/arcraiders-data
