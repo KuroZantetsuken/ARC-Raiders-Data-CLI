@@ -34,6 +34,7 @@ jobs:
           
           cp ARCSearch.ps1 release/
           cp setup.bat release/
+          cp LICENSE release/
           
           # Recreate arc.bat in the package
           echo "@echo off" > release/arc.bat
