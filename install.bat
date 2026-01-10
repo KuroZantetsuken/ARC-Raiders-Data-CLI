@@ -8,6 +8,12 @@ REM Get the script's directory
 set "ScriptPath=%~dp0"
 set "ScriptPath=%ScriptPath:~0,-1%"
 
+echo [*] Creating 'arc.bat' alias...
+(
+    echo @echo off
+    echo powershell -ExecutionPolicy Bypass -File "%%~dp0ARCSearch.ps1" %%*
+) > "%~dp0arc.bat"
+
 echo [*] Adding '%ScriptPath%' to User PATH...
 
 REM PowerShell command to safely add the directory to the user's PATH
