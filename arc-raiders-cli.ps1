@@ -1162,6 +1162,9 @@ foreach ($Skill in $Global:Data.Skills) {
     }
 }
 
+# Sort Results Alphabetically
+$Results = $Results | Sort-Object Name
+
 # Result Handling
 if ($Results.Count -eq 0) {
     Write-Ansi "No results found." $Palette.Error
