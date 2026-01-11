@@ -1314,3 +1314,25 @@ if ($CurrentVersion -ne "vDEV") {
     $NewVersion = Get-UpdateInfo
     if ($NewVersion) { Show-UpdateBanner -NewVersion $NewVersion }
 }
+
+# Auto-pause if running in a transient terminal window (e.g. from a launcher)
+# This prevents the window from closing immediately before the user can read the results.
+try {
+    $CurrentProc = Get-Process -Id $PID
+    $ParentProc = $CurrentProc.Parent
+    
+    # If called via arc.bat, the parent is 'cmd', so we check one level higher
+    if ($ParentProc.Name -eq "cmd") {
+        $ParentProc = $ParentProc.Parent
+    }
+    
+    # Common persistent shell and terminal names
+    $ShellNames = "powershell|pwsh|cmd|wt|windowsterminal|bash|zsh|fish"
+    
+    if ($ParentProc.Name -notmatch $ShellNames) {
+        Write-Ansi "`nPress any key to exit..." $Palette.Subtext
+        $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    }
+} catch {
+    # Fallback to silent exit if process inspection fails
+}
