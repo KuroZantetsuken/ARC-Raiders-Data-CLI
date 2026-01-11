@@ -193,7 +193,10 @@ function Import-JsonFast {
         $Content = [System.IO.File]::ReadAllText($Path)
         return $Content | ConvertFrom-Json -ErrorAction Stop
     } catch {
-        Write-Ansi "Warning: Failed to parse JSON at $Path`: $($_.Exception.Message)" $Palette.Warning
+        # Only warn if the file isn't empty (empty files are common for new caches)
+        if ((Get-Item $Path).Length -gt 0) {
+            Write-Ansi "Warning: Failed to parse JSON at $Path`: $($_.Exception.Message)" $Palette.Warning
+        }
         return $null
     }
 }
@@ -203,9 +206,15 @@ function Save-Cache {
     try {
         # Ensure we save a clean object to avoid PSCustomObject 'value' nesting issues
         $CleanCache = @{}
-        foreach ($Prop in $Cache.PSObject.Properties) {
-            $CleanCache[$Prop.Name] = $Prop.Value
+        
+        if ($Cache -is [hashtable]) {
+            $CleanCache = $Cache
+        } elseif ($null -ne $Cache.PSObject) {
+            foreach ($Prop in $Cache.PSObject.Properties) {
+                $CleanCache[$Prop.Name] = $Prop.Value
+            }
         }
+        
         $CleanCache | ConvertTo-Json -Depth 20 -Compress | Set-Content $GlobalCache -ErrorAction Stop
     } catch {
         # Silent failure for cache saving is acceptable, but we don't want to crash
@@ -374,11 +383,7 @@ function Get-UpdateInfo {
         $UpdateCache.LastCheck = $Now.ToString("o")
         $UpdateCache.LatestVersion = $VerToCache
 
-        if ($Cache.PSObject -and -not $Cache.PSObject.Properties['Updates']) {
-            $Cache | Add-Member -MemberType NoteProperty -Name "Updates" -Value $UpdateCache
-        } else {
-            $Cache.Updates = $UpdateCache
-        }
+        $Cache["Updates"] = $UpdateCache
         Save-Cache -Cache $Cache
         
         if ($VerToCache -ne $CurrentVersion) {
@@ -491,9 +496,18 @@ function Initialize-Data {
 
     # Check Cache Validity
     $NeedsRebuild = $true
-    $Cache = if (Test-Path $GlobalCache) { Import-JsonFast $GlobalCache } else { @{} }
+    $Cache = if (Test-Path $GlobalCache) { Import-JsonFast $GlobalCache } else { $null }
     
-    if ($Cache.Data) {
+    # Standardize cache to hashtable for consistent access and mutability
+    if ($null -eq $Cache) {
+        $Cache = @{}
+    } elseif ($Cache -isnot [hashtable]) {
+        $H = @{}
+        foreach ($P in $Cache.PSObject.Properties) { $H[$P.Name] = $P.Value }
+        $Cache = $H
+    }
+    
+    if ($Cache.ContainsKey("Data") -and $null -ne $Cache.Data) {
         $CacheTime = (Get-Item $GlobalCache).LastWriteTime
         
         # Fast check: only check the directories themselves first
@@ -515,8 +529,16 @@ function Initialize-Data {
         }
     }
 
+    # Standardize 'Updates' cache if it exists for consistent key access
+    if ($Cache.ContainsKey("Updates") -and $Cache.Updates -isnot [hashtable]) {
+        $H = @{}
+        foreach ($P in $Cache.Updates.PSObject.Properties) { $H[$P.Name] = $P.Value }
+        $Cache.Updates = $H
+    }
+
     if ($ShowStatus) {
-        $StatusMsg = if ($NeedsRebuild -and -not $Cache.Data) { " (building cache)" } elseif ($NeedsRebuild) { " (updating cache)" } else { "" }
+        $HasData = $Cache.ContainsKey("Data") -and $null -ne $Cache.Data
+        $StatusMsg = if ($NeedsRebuild -and -not $HasData) { " (building cache)" } elseif ($NeedsRebuild) { " (updating cache)" } else { "" }
         Write-Ansi "Searching$StatusMsg..." $Palette.Subtext
     }
 
@@ -562,7 +584,7 @@ function Initialize-Data {
         if (Test-Path $PathTrades)   { $Global:Data.Trades   = Import-JsonFast $PathTrades }
 
         # Save Cache
-        $Cache.Data = $Global:Data
+        $Cache["Data"] = $Global:Data
         Save-Cache -Cache $Cache
         
         $Global:DataLoaded = $true
