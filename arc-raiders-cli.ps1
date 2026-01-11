@@ -1070,6 +1070,52 @@ function Show-Events {
 # MAIN CONTROLLER
 # -----------------------------------------------------------------------------
 
+function Show-Quest {
+    param ($Quest)
+    $C = @("TRADER: $($Quest.trader)", "---")
+    if ($Quest.objectives) {
+        $C += "OBJECTIVES:"
+        foreach($o in $Quest.objectives){
+            if($o.en){
+                $Obj = "[ ] $($o.en)"
+                $C += (Get-WrappedText $Obj -Indent " ")
+            }
+        }
+    }
+    Show-Card -Title $Quest.name.en -Subtitle "Quest" -Content $C -ThemeColor $Palette.Accent
+}
+
+function Show-Hideout {
+    param ($Hideout)
+    $C = @("UPGRADES:")
+    foreach($L in $Hideout.levels){
+        $C += "---"
+        $C += " Level $($L.level)"
+        if ($L.requirementItemIds) {
+            foreach ($Req in $L.requirementItemIds) {
+                $C += "  - $($Req.quantity)x $(Get-ItemName $Req.itemId)"
+            }
+        }
+    }
+    Show-Card -Title $Hideout.name.en -Subtitle "Hideout" -Content $C -ThemeColor $Palette.Accent
+}
+
+function Invoke-DisplayResult {
+    param ($Result)
+    $T = $Result
+    switch ($T.Type) {
+        "Item"    { Show-Item $T.Data }
+        "ARC"     { Show-Bot $T.Data }
+        "Project" { Show-Project $T.Data }
+        "Skill"   { Show-Skill $T.Data }
+        "Quest"   { Show-Quest $T.Data }
+        "Hideout" { Show-Hideout $T.Data }
+        default {
+            Write-Ansi "Unknown result type: $($T.Type)" $Palette.Error
+        }
+    }
+}
+
 function Show-Help {
     Write-BoxRow $Sym.Box.TL $Sym.Box.H $Sym.Box.TR $Palette.Border $W_Events
     
@@ -1186,41 +1232,7 @@ $Results = @($Results | Sort-Object Name)
 if ($Results.Count -eq 0) {
     Write-Ansi "No results found." $Palette.Error
 } elseif ($Results.Count -eq 1) {
-    $T = $Results[0]
-    switch ($T.Type) {
-        "Item"    { Show-Item $T.Data }
-        "ARC"     { Show-Bot $T.Data }
-        "Project" { Show-Project $T.Data }
-        "Skill"   { Show-Skill $T.Data }
-        "Quest"   { 
-            $Q = $T.Data
-            $C = @("TRADER: $($Q.trader)", "---")
-            if ($Q.objectives) { 
-                $C += "OBJECTIVES:"
-                foreach($o in $Q.objectives){
-                    if($o.en){
-                        $Obj = "[ ] $($o.en)"
-                        $C += (Get-WrappedText $Obj -Indent " ")
-                    }
-                } 
-            }
-            Show-Card -Title $Q.name.en -Subtitle "Quest" -Content $C -ThemeColor $Palette.Accent
-        }
-        "Hideout" {
-            $H = $T.Data
-            $C = @("UPGRADES:")
-            foreach($L in $H.levels){ 
-                $C += "---"
-                $C += " Level $($L.level)" 
-                if ($L.requirementItemIds) {
-                    foreach ($Req in $L.requirementItemIds) {
-                        $C += "  - $($Req.quantity)x $(Get-ItemName $Req.itemId)"
-                    }
-                }
-            } 
-            Show-Card -Title $H.name.en -Subtitle "Hideout" -Content $C -ThemeColor $Palette.Accent
-        }
-    }
+    Invoke-DisplayResult $Results[0]
 } else {
     # Check for Auto-Select Argument
     if ($SelectIndex -ge 0 -and $SelectIndex -lt $Results.Count) {
@@ -1246,41 +1258,7 @@ if ($Results.Count -eq 0) {
     }
 
     if ($null -ne $Idx -and $Idx -lt $Results.Count) {
-        $T = $Results[$Idx]
-        switch ($T.Type) {
-            "Item"    { Show-Item $T.Data }
-            "ARC"     { Show-Bot $T.Data }
-            "Project" { Show-Project $T.Data }
-            "Skill"   { Show-Skill $T.Data }
-            "Quest"   { 
-                $Q = $T.Data
-                $C = @("TRADER: $($Q.trader)", "---")
-                if ($Q.objectives) { 
-                    $C += "OBJECTIVES:"
-                    foreach($o in $Q.objectives){
-                        if($o.en){
-                            $Obj = "[ ] $($o.en)"
-                            $C += (Get-WrappedText $Obj -Indent " ")
-                        }
-                    } 
-                }
-                Show-Card -Title $Q.name.en -Subtitle "Quest" -Content $C -ThemeColor $Palette.Accent
-            }
-            "Hideout" {
-                $H = $T.Data
-                $C = @("UPGRADES:")
-                foreach($L in $H.levels){ 
-                    $C += "---"
-                    $C += " Level $($L.level)" 
-                    if ($L.requirementItemIds) {
-                        foreach ($Req in $L.requirementItemIds) {
-                            $C += "  - $($Req.quantity)x $(Get-ItemName $Req.itemId)"
-                        }
-                    }
-                }
-                Show-Card -Title $H.name.en -Subtitle "Hideout" -Content $C -ThemeColor $Palette.Accent
-            }
-        }
+        Invoke-DisplayResult $Results[$Idx]
     }
 }
 
