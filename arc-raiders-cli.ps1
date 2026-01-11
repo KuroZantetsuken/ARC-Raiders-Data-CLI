@@ -15,7 +15,7 @@
     - Skill Nodes
 
 .EXAMPLE
-    arc "Cat Bed"
+    arc Cat Bed
     Search for an item and view its details.
 
 .EXAMPLE
@@ -41,9 +41,21 @@
 #>
 
 param (
-    [string]$Query,
-    [int]$SelectIndex = -1
+    [Parameter(Position=0, ValueFromRemainingArguments=$true)]
+    [string[]]$InputArgs
 )
+
+$Query = ""
+$SelectIndex = -1
+
+if ($InputArgs) {
+    if ($InputArgs.Count -gt 1 -and $InputArgs[-1] -match '^\d+$') {
+        $SelectIndex = [int]$InputArgs[-1]
+        $Query = $InputArgs[0..($InputArgs.Count - 2)] -join " "
+    } else {
+        $Query = $InputArgs -join " "
+    }
+}
 
 # -----------------------------------------------------------------------------
 # CONSTANTS & CONFIGURATION
@@ -1057,14 +1069,14 @@ function Show-Help {
         "  arc             Display this help text"
         "  arc update      Check and install updates",
         "  arc events      Check event rotation",
-        "  arc `"Cat Bed`"   Search for 'Cat Bed'",
+        "  arc Cat Bed     Search for 'Cat Bed'",
         "  arc cat 0       View the first result for 'cat'",
         "",
         "TIPS:",
         "  - Use 'arc' from anywhere after running install.bat",
         "  - Select results using number keys (0-9)",
         "      or optional index argument",
-        "  - Multi word queries must be in quotation marks"
+        "  - Quotes are optional for multi-word searches"
     )
 
     foreach ($Line in $HelpLines) {
