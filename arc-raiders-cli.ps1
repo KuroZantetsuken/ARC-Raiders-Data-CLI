@@ -435,6 +435,9 @@ function Update-ArcRaidersCLI {
         # Cleanup temp directory
         Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue
         
+        # Force cache wipe on next run
+        if (Test-Path $GlobalCache) { Remove-Item $GlobalCache -Force -ErrorAction SilentlyContinue }
+
         Write-Ansi "Update complete! Version $($Latest.tag_name) is now installed." $Palette.Success
         Write-Ansi "Please restart your terminal or session if you experience issues." $Palette.Subtext
     } catch {
@@ -475,7 +478,7 @@ function Initialize-Data {
         $CacheTime = (Get-Item $GlobalCache).LastWriteTime
         
         # Fast check: check data sources and the script itself for changes
-        $WatchPaths = @($PSCommandPath, $PathItems, $PathQuests, $PathHideout, $PathBots, $PathProjects, $PathSkills, $PathTrades)
+        $WatchPaths = @($PSCommandPath, $DataDir, $PathItems, $PathQuests, $PathHideout, $PathBots, $PathProjects, $PathSkills, $PathTrades)
         $NeedsRebuild = $false
         foreach ($Path in $WatchPaths) {
             if ((Test-Path $Path) -and (Get-Item $Path).LastWriteTime -gt $CacheTime) {
@@ -499,9 +502,8 @@ function Initialize-Data {
     }
 
     if ($NeedsRebuild) {
-        # Reset to defaults
-        $Global:Data.Items = @{}
-        $Global:Data.Quests = $Global:Data.Hideout = $Global:Data.Bots = $Global:Data.Projects = $Global:Data.Skills = $Global:Data.Trades = @()
+        # Completely wipe the cache object to avoid structure conflicts
+        $Cache = @{}
 
         # Load from files
         if (Test-Path $PathItems)   { [System.IO.Directory]::GetFiles($PathItems, "*.json")  | ForEach-Object { $J = Import-JsonFast $_; if ($J) { $Global:Data.Items[$J.id] = $J } } }
