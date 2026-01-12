@@ -46,37 +46,33 @@ param (
 )
 
 # -----------------------------------------------------------------------------
-# PREREQUISITES
+# PREREQUISITES & ARGUMENTS
 # -----------------------------------------------------------------------------
 
 $RepoRoot = $PSScriptRoot
-$PathItems = Join-Path $RepoRoot "arcraiders-data\items"
+$DataDir  = Join-Path $RepoRoot "arcraiders-data"
+$PathItems, $PathQuests, $PathHideout, $PathEvents, $PathBots, $PathProjects, $PathSkills, $PathTrades = @(
+    "items", "quests", "hideout", "map-events\map-events.json", "bots.json", "projects.json", "skillNodes.json", "trades.json"
+) | ForEach-Object { Join-Path $DataDir $_ }
+$GlobalCache = Join-Path $RepoRoot ".cache"
 
 # Check for Data Submodule
 if (-not (Test-Path $PathItems)) {
-    # Only try to update if we are in a git repo
     if (Test-Path (Join-Path $RepoRoot ".git")) {
-        Write-Host ""
-        Write-Host "[!] Data missing. Initializing submodule..." -ForegroundColor Yellow
+        Write-Host "`n[!] Data missing. Initializing submodule..." -ForegroundColor Yellow
         try {
             Start-Process git -ArgumentList "submodule update --init --recursive" -Wait -NoNewWindow
-            if (Test-Path $PathItems) {
-                Write-Host "[+] Data initialized. Please re-run command." -ForegroundColor Green
-            } else {
-                Write-Host "[!] Failed to initialize git submodule. Please run: git submodule update --init --recursive" -ForegroundColor Red
-            }
-        } catch {
-            Write-Host "[!] Error initializing submodule: $($_.Exception.Message)" -ForegroundColor Red
-        }
+            if (Test-Path $PathItems) { Write-Host "[+] Data initialized. Please re-run command." -ForegroundColor Green }
+            else { Write-Host "[!] Failed to initialize submodule. Run: git submodule update --init --recursive" -ForegroundColor Red }
+        } catch { Write-Host "[!] Error: $($_.Exception.Message)" -ForegroundColor Red }
     } else {
-        Write-Host "[!] Error: Data directory missing and not in a git repository." -ForegroundColor Red
+        Write-Host "[!] Error: Data directory missing." -ForegroundColor Red
     }
     exit
 }
 
-$Query = ""
-$SelectIndex = -1
-
+# Parse Arguments
+$Query = ""; $SelectIndex = -1
 if ($InputArgs) {
     if ($InputArgs.Count -gt 1 -and $InputArgs[-1] -match '^\d+$') {
         $SelectIndex = [int]$InputArgs[-1]
@@ -87,38 +83,23 @@ if ($InputArgs) {
 }
 
 # -----------------------------------------------------------------------------
-# CONSTANTS & CONFIGURATION
+# CONFIGURATION & THEME
 # -----------------------------------------------------------------------------
 
 $CurrentVersion = "vDEV"
 
-# Start background update check as early as possible
-$UpdateJob = $null
-if ($CurrentVersion -ne "vDEV") {
-    $UpdateJob = Start-Job -Name "ArcUpdateCheck" -ScriptBlock {
+# Start background update check
+$UpdateJob = if ($CurrentVersion -ne "vDEV") {
+    Start-Job -Name "ArcUpdateCheck" -ScriptBlock {
         param($Ver)
         try {
-            $Repo = "KuroZantetsuken/ARC-Raiders-CLI"
-            $Url  = "https://api.github.com/repos/$Repo/releases/latest"
-            $Latest = Invoke-RestMethod -Uri $Url -ErrorAction SilentlyContinue
-            if ($Latest -and $Latest.tag_name -and $Latest.tag_name -ne $Ver) {
-                return $Latest.tag_name
-            }
+            $Latest = Invoke-RestMethod -Uri "https://api.github.com/repos/KuroZantetsuken/ARC-Raiders-CLI/releases/latest" -ErrorAction SilentlyContinue
+            if ($Latest.tag_name -and $Latest.tag_name -ne $Ver) { return $Latest.tag_name }
         } catch {}
         return $null
     } -ArgumentList $CurrentVersion
-}
+} else { $null }
 
-$RepoRoot       = $PSScriptRoot
-$PathItems      = Join-Path $RepoRoot "arcraiders-data\items"
-$PathQuests     = Join-Path $RepoRoot "arcraiders-data\quests"
-$PathHideout    = Join-Path $RepoRoot "arcraiders-data\hideout"
-$PathEvents     = Join-Path $RepoRoot "arcraiders-data\map-events\map-events.json"
-$PathBots       = Join-Path $RepoRoot "arcraiders-data\bots.json"
-$PathProjects   = Join-Path $RepoRoot "arcraiders-data\projects.json"
-$PathSkills     = Join-Path $RepoRoot "arcraiders-data\skillNodes.json"
-$PathTrades     = Join-Path $RepoRoot "arcraiders-data\trades.json"
-$GlobalCache    = Join-Path $RepoRoot ".cache"
 
 # ANSI Escape Codes
 $Theme = @{
@@ -159,6 +140,8 @@ $Palette = @{
     SURVIVAL     = $Theme.Red
 }
 
+$Esc = [char]27
+
 # Symbols
 $Sym = @{
     Currency    = [char]0x29B6 # ⦶
@@ -192,7 +175,6 @@ function Write-Ansi {
         [switch]$NoNewline
     )
     if ([string]::IsNullOrEmpty($Text)) { return }
-    $Esc = [char]27
     $Out = "$Esc[${ColorCode}m$Text$Esc[0m"
     if ($NoNewline) { Write-Host $Out -NoNewline } else { Write-Host $Out }
 }
@@ -204,12 +186,29 @@ function Get-DisplayLength {
     return $Clean.Length
 }
 
+function ConvertTo-Hashtable {
+    param ($Object)
+    if ($null -eq $Object) { return @{} }
+    if ($Object -is [hashtable]) { return $Object }
+    $H = @{}
+    if ($null -ne $Object.PSObject) {
+        foreach ($P in $Object.PSObject.Properties) { $H[$P.Name] = $P.Value }
+    }
+    return $H
+}
+
 function Import-JsonFast {
     param ([string]$Path)
     if (-not (Test-Path $Path)) { return $null }
     try {
         $Content = [System.IO.File]::ReadAllText($Path)
-        return $Content | ConvertFrom-Json -ErrorAction Stop
+        $Data = $Content | ConvertFrom-Json -ErrorAction Stop
+        
+        # Handle PowerShell's occasional 'value' property wrapping for collections
+        if ($null -ne $Data -and $null -ne $Data.PSObject -and $null -ne $Data.PSObject.Properties["value"] -and $null -ne $Data.PSObject.Properties["Count"]) {
+            return $Data.value
+        }
+        return $Data
     } catch {
         # Only warn if the file isn't empty (empty files are common for new caches)
         if ((Get-Item $Path).Length -gt 0) {
@@ -223,16 +222,7 @@ function Save-Cache {
     param ($Cache)
     try {
         # Ensure we save a clean object to avoid PSCustomObject 'value' nesting issues
-        $CleanCache = @{}
-        
-        if ($Cache -is [hashtable]) {
-            $CleanCache = $Cache
-        } elseif ($null -ne $Cache.PSObject) {
-            foreach ($Prop in $Cache.PSObject.Properties) {
-                $CleanCache[$Prop.Name] = $Prop.Value
-            }
-        }
-        
+        $CleanCache = ConvertTo-Hashtable $Cache
         ConvertTo-Json -InputObject $CleanCache -Depth 20 -Compress | Set-Content $GlobalCache -ErrorAction Stop
     } catch {
         # Silent failure for cache saving is acceptable, but we don't want to crash
@@ -292,10 +282,8 @@ function Write-BoxRow {
         [string]$Color = $Palette.Border,
         [int]$Width = 60
     )
-    $FillLen = $Width - 2
-    if ($FillLen -lt 0) { $FillLen = 0 }
-    $Line = [string]::new($Middle[0], $FillLen)
-    Write-Ansi "$Left$Line$Right" $Color
+    $Fill = if ($Width -gt 2) { [string]::new($Middle[0], $Width - 2) } else { "" }
+    Write-Ansi "$Left$Fill$Right" $Color
 }
 
 function Write-ContentRow {
@@ -304,19 +292,13 @@ function Write-ContentRow {
         [string]$TextColor = $Palette.Text,
         [string]$BorderColor = $Palette.Border,
         [int]$Width = 60,
-        [string]$Align = "Left" # Left, Center, Right
+        [string]$Align = "Left"
     )
     $VisLen = Get-DisplayLength $Text
-    $PadTotal = $Width - 2 - $VisLen
-    if ($PadTotal -lt 0) { $PadTotal = 0 } 
+    $PadTotal = [math]::Max(0, $Width - 2 - $VisLen)
     
-    $PadL = 0; $PadR = 0
-    
-    switch ($Align) {
-        "Left"   { $PadR = $PadTotal }
-        "Right"  { $PadL = $PadTotal }
-        "Center" { $PadL = [math]::Floor($PadTotal / 2); $PadR = [math]::Ceiling($PadTotal / 2) }
-    }
+    $PadL = switch ($Align) { "Right" { $PadTotal }; "Center" { [math]::Floor($PadTotal / 2) }; default { 0 } }
+    $PadR = $PadTotal - $PadL
     
     Write-Ansi $Sym.Box.V $BorderColor -NoNewline
     Write-Ansi "$(' '*$PadL)$Text$(' '*$PadR)" $TextColor -NoNewline
@@ -333,33 +315,27 @@ function Show-Card {
         [int]$Width = 60
     )
     
-    # Top Border
     Write-BoxRow $Sym.Box.TL $Sym.Box.H $Sym.Box.TR $BorderColor $Width
     
-    # Title
     if ($Title) {
         $T = $Title.ToUpper()
-        if ($T.Length -gt ($Width-4)) { $T = $T.Substring(0, $Width-7) + "..." }
+        if ((Get-DisplayLength $T) -gt ($Width-4)) { $T = $T.Substring(0, $Width-7) + "..." }
         Write-ContentRow -Text $T -TextColor $ThemeColor -BorderColor $BorderColor -Width $Width
     }
     
-    # Subtitle
     if ($Subtitle) {
         Write-ContentRow -Text $Subtitle -TextColor $Palette.Subtext -BorderColor $BorderColor -Width $Width
     }
     
-    # Content
     foreach ($Line in $Content) {
         if ($Line -eq "---") {
             Write-BoxRow $Sym.Box.L $Sym.Box.H $Sym.Box.R $BorderColor $Width
         } else {
-            # Handle manual coloring embedded in lines
             $RowColor = if ($Line -match "\x1B\[") { $Theme.Reset } else { $Palette.Text }
             Write-ContentRow -Text $Line -TextColor $RowColor -BorderColor $BorderColor -Width $Width
         }
     }
     
-    # Bottom Border
     Write-BoxRow $Sym.Box.BL $Sym.Box.H $Sym.Box.BR $BorderColor $Width
 }
 
@@ -492,67 +468,26 @@ function Initialize-Data {
 
     # Check Cache Validity
     $NeedsRebuild = $true
-    $Cache = if (Test-Path $GlobalCache) { Import-JsonFast $GlobalCache } else { $null }
-    
-    # Standardize cache to hashtable for consistent access and mutability
-    if ($null -eq $Cache) {
-        $Cache = @{}
-    } elseif ($Cache -isnot [hashtable]) {
-        $H = @{}
-        foreach ($P in $Cache.PSObject.Properties) { $H[$P.Name] = $P.Value }
-        $Cache = $H
-    }
+    $Cache = if (Test-Path $GlobalCache) { Import-JsonFast $GlobalCache } else { @{} }
+    $Cache = ConvertTo-Hashtable $Cache
     
     if ($Cache.ContainsKey("Data") -and $null -ne $Cache.Data) {
         $CacheTime = (Get-Item $GlobalCache).LastWriteTime
         
         # Fast check: check data sources and the script itself for changes
-        $WatchPaths = @(
-            $PSCommandPath,
-            $PathItems,
-            $PathQuests,
-            $PathHideout,
-            $PathBots,
-            $PathProjects,
-            $PathSkills,
-            $PathTrades
-        )
+        $WatchPaths = @($PSCommandPath, $PathItems, $PathQuests, $PathHideout, $PathBots, $PathProjects, $PathSkills, $PathTrades)
         $NeedsRebuild = $false
         foreach ($Path in $WatchPaths) {
-            if (Test-Path $Path) {
-                if ((Get-Item $Path).LastWriteTime -gt $CacheTime) {
-                    $NeedsRebuild = $true
-                    break
-                }
+            if ((Test-Path $Path) -and (Get-Item $Path).LastWriteTime -gt $CacheTime) {
+                $NeedsRebuild = $true
+                break
             }
         }
         
-        # If directories look okay, we trust the cache (avoids recursive file scan)
+        # If data sources haven't changed, we trust the cache
         if (-not $NeedsRebuild) {
-            # Standardize Global:Data to hashtable for consistent searching
-            $DataObj = $Cache.Data
-            if ($null -ne $DataObj -and $DataObj -isnot [hashtable]) {
-                $H = @{}
-                foreach ($P in $DataObj.PSObject.Properties) {
-                    $Val = $P.Value
-
-                    # Handle PowerShell's occasional 'value' property wrapping for collections
-                    if ($null -ne $Val -and $null -ne $Val.PSObject -and $null -ne $Val.PSObject.Properties["value"] -and $null -ne $Val.PSObject.Properties["Count"]) {
-                        $Val = $Val.value
-                    }
-
-                    # Standardize the Items collection specifically as it's used as a map
-                    if ($P.Name -eq "Items" -and $Val -isnot [hashtable]) {
-                        $ItemsH = @{}
-                        foreach ($ItemP in $Val.PSObject.Properties) { $ItemsH[$ItemP.Name] = $ItemP.Value }
-                        $Val = $ItemsH
-                    }
-                    $H[$P.Name] = $Val
-                }
-                $Global:Data = $H
-            } else {
-                $Global:Data = $DataObj
-            }
+            $Global:Data = $Cache.Data
+            $Global:Data.Items = ConvertTo-Hashtable $Global:Data.Items
             $Global:DataLoaded = $true
         }
     }
@@ -564,50 +499,23 @@ function Initialize-Data {
     }
 
     if ($NeedsRebuild) {
-        $Global:Data = @{
-            Items    = @{}
-            Quests   = @()
-            Hideout  = @()
-            Bots     = @()
-            Projects = @()
-            Skills   = @()
-            Trades   = @()
-        }
-        # 1. Items
-        if (Test-Path $PathItems) {
-            $Files = [System.IO.Directory]::GetFiles($PathItems, "*.json")
-            foreach ($File in $Files) {
-                $Json = Import-JsonFast $File
-                if ($Json) { $Global:Data.Items[$Json.id] = $Json }
-            }
-        }
+        # Reset to defaults
+        $Global:Data.Items = @{}
+        $Global:Data.Quests = $Global:Data.Hideout = $Global:Data.Bots = $Global:Data.Projects = $Global:Data.Skills = $Global:Data.Trades = @()
 
-        # 2. Quests
-        if (Test-Path $PathQuests) {
-            Get-ChildItem $PathQuests "*.json" | ForEach-Object {
-                $J = Import-JsonFast $_.FullName
-                if ($J) { $Global:Data.Quests += $J }
-            }
-        }
+        # Load from files
+        if (Test-Path $PathItems)   { [System.IO.Directory]::GetFiles($PathItems, "*.json")  | ForEach-Object { $J = Import-JsonFast $_; if ($J) { $Global:Data.Items[$J.id] = $J } } }
+        if (Test-Path $PathQuests)  { $Global:Data.Quests  = @([System.IO.Directory]::GetFiles($PathQuests, "*.json")  | ForEach-Object { Import-JsonFast $_ } | Where-Object { $_ }) }
+        if (Test-Path $PathHideout) { $Global:Data.Hideout = @([System.IO.Directory]::GetFiles($PathHideout, "*.json") | ForEach-Object { Import-JsonFast $_ } | Where-Object { $_ }) }
+        
+        $Global:Data.Bots     = @(Import-JsonFast $PathBots)
+        $Global:Data.Projects = @(Import-JsonFast $PathProjects)
+        $Global:Data.Skills   = @(Import-JsonFast $PathSkills)
+        $Global:Data.Trades   = @(Import-JsonFast $PathTrades)
 
-        # 3. Hideout
-        if (Test-Path $PathHideout) {
-            Get-ChildItem $PathHideout "*.json" | ForEach-Object {
-                $J = Import-JsonFast $_.FullName
-                if ($J) { $Global:Data.Hideout += $J }
-            }
-        }
-
-        # 4. Other Data
-        if (Test-Path $PathBots)     { $Global:Data.Bots     = Import-JsonFast $PathBots }
-        if (Test-Path $PathProjects) { $Global:Data.Projects = Import-JsonFast $PathProjects }
-        if (Test-Path $PathSkills)   { $Global:Data.Skills   = Import-JsonFast $PathSkills }
-        if (Test-Path $PathTrades)   { $Global:Data.Trades   = Import-JsonFast $PathTrades }
-
-        # Save Cache
+        # Update cache
         $Cache["Data"] = $Global:Data
         Save-Cache -Cache $Cache
-        
         $Global:DataLoaded = $true
     }
 }
@@ -650,33 +558,21 @@ function Get-StashSpaceDelta {
 
 function Get-FormattedBadge {
     param ($Text, $ColorKey)
-    $ColorCode = if ($Palette.ContainsKey($ColorKey)) { $Palette[$ColorKey] } else { $Palette.Common }
-    $Esc = [char]27
-    
-    # Always format with background for consistency and readability
-    $BgCode = [int]$ColorCode + 10
-    return "$Esc[${BgCode};30m $Text $Esc[0m"
+    $C = if ($Palette.ContainsKey($ColorKey)) { $Palette[$ColorKey] } else { $Palette.Common }
+    $Bg = [int]$C + 10
+    return "$Esc[${Bg};30m $Text $Esc[0m"
 }
 
 function Format-DiffString {
-    param ([int]$Value, [bool]$InvertColors = $false)
-    $Esc = [char]27
-    $Sign = if ($Value -gt 0) { "+" } else { "" }
-    
-    # Default: Positive is Good (Green), Negative is Bad (Red)
-    # Inverted: Positive is Bad (Red), Negative is Good (Green)
-    
-    $Color = $Palette.Text
-    if ($InvertColors) {
-        if ($Value -gt 0) { $Color = $Palette.Error } # Bad (More expensive)
-        elseif ($Value -lt 0) { $Color = $Palette.Success } # Good (Cheaper)
+    param ([int]$Value, [switch]$Invert)
+    if ($Value -eq 0) { return "" }
+    $S = if ($Value -gt 0) { "+" } else { "" }
+    if ($Invert) {
+        $C = if ($Value -gt 0) { $Palette.Error } else { $Palette.Success }
     } else {
-        if ($Value -gt 0) { $Color = $Palette.Success } # Good (Profit)
-        elseif ($Value -lt 0) { $Color = $Palette.Error } # Bad (Loss)
+        $C = if ($Value -gt 0) { $Palette.Success } else { $Palette.Error }
     }
-    
-    # Only color the number
-    return "($Esc[${Color}m$Sign$Value$Esc[0m)"
+    return "($Esc[${C}m$S$Value$Esc[0m)"
 }
 
 # -----------------------------------------------------------------------------
@@ -685,195 +581,78 @@ function Format-DiffString {
 
 function Show-Item {
     param ($Item)
-    $Esc = [char]27
-    $RarityColor = if ($Palette.ContainsKey($Item.rarity)) { $Palette[$Item.rarity] } else { $Palette.Common }
-    $Indent = " "
-    $Lines = @()
-
-    # Header
-    $Badge1 = Get-FormattedBadge -Text $Item.type -ColorKey $Item.rarity
-    $Badge2 = Get-FormattedBadge -Text $Item.rarity -ColorKey $Item.rarity
-    $Lines += ($Indent + "$Badge1 $Badge2")
-    
-    # Description
-    if ($Item.description.en) {
-        $Lines += (Get-WrappedText -Text $Item.description.en -Indent $Indent)
-    }
+    $Color = if ($Palette.ContainsKey($Item.rarity)) { $Palette[$Item.rarity] } else { $Palette.Common }
+    $Lines = @(" $(Get-FormattedBadge $Item.type $Item.rarity) $(Get-FormattedBadge $Item.rarity $Item.rarity)")
+    if ($Item.description.en) { $Lines += (Get-WrappedText $Item.description.en -Indent " ") }
     
     # Effects
     if ($Item.effects) {
-        $EffLines = @()
-        foreach ($Key in $Item.effects.PSObject.Properties.Name) {
-            if ($Key -eq "Durability") { continue }
-            $Eff = $Item.effects.$Key
-            $Label = if ($Eff.en) { $Eff.en } else { $Key }
-            if ($Eff.value) { $EffLines += ($Indent + "$($Label): $($Eff.value)") }
+        $Effs = foreach ($K in $Item.effects.PSObject.Properties.Name) {
+            if ($K -eq "Durability") { continue }
+            $E = $Item.effects.$K; $L = if ($E.en) { $E.en } else { $K }
+            if ($E.value) { " $($L): $($E.value)" }
         }
-        if ($EffLines.Count -gt 0) { $Lines += "---"; $Lines += $EffLines }
+        if ($Effs) { $Lines += "---"; $Lines += $Effs }
     }
     
-    # Properties
+    # Stats
     $Lines += "---"
-    $Props = @()
-    if ($Item.stackSize) { $Props += "$($Sym.Stack) $($Item.stackSize)" }
-    if ($Item.weightKg)  { $Props += "$($Sym.Weight) $($Item.weightKg)kg" }
-    $Val = if ($Item.value) { $Item.value } else { 0 }
-    $Props += "$($Sym.Currency) $Val"
-    $Lines += ($Indent + ($Props -join "   "))
+    $Stats = @()
+    if ($Item.stackSize) { $Stats += "$($Sym.Stack) $($Item.stackSize)" }
+    if ($Item.weightKg)  { $Stats += "$($Sym.Weight) $($Item.weightKg)kg" }
+    $Val = [int]$Item.value; $Stats += "$($Sym.Currency) $Val"
+    $Lines += " $($Stats -join '   ')"
     
-    # Crafting
+    # Recipe
     if ($Item.recipe) {
-        $Lines += "---"
-        $Lines += ($Indent + "RECIPE:")
-        $Cost = 0
-        $Item.recipe.PSObject.Properties | ForEach-Object { 
-            $RecLine = " - $($_.Value)x $(Get-ItemName $_.Name)"
-            $Lines += (Get-WrappedText $RecLine -Indent $Indent)
-            $Cost += ($_.Value * (Get-ItemValue $_.Name)) 
+        $Lines += "---"; $Lines += " RECIPE:"; $Cost = 0
+        foreach ($P in $Item.recipe.PSObject.Properties) {
+            $Lines += (Get-WrappedText " - $($P.Value)x $(Get-ItemName $P.Name)" -Indent " ")
+            $Cost += ($P.Value * (Get-ItemValue $P.Name))
         }
-        
-        # Profit = Value - Cost. Negative is Bad (Red).
-        $ProfitDiff = $Val - $Cost
-        $DiffStr = Format-DiffString -Value $ProfitDiff -InvertColors $false
-        
-        $Lines += ($Indent + "COST: $($Sym.Currency) $Cost $DiffStr")
-
+        $Lines += " COST: $($Sym.Currency) $Cost $(Format-DiffString ($Val - $Cost))"
         $Delta = Get-StashSpaceDelta -Item $Item
-        if ($null -ne $Delta) {
-            $DeltaVal = "{0:0.##}" -f $Delta
-            # Delta > 0 (More space) is Bad (Red). Delta < 0 (Less space) is Good (Green).
-            $Msg = ""
-            if ($Delta -gt 0) {
-                $Msg = "SPACE: $Esc[$($Palette.Error)m$DeltaVal$Esc[0m more slots"
-            } elseif ($Delta -lt 0) {
-                $Msg = "SPACE: $Esc[$($Palette.Success)m$DeltaVal$Esc[0m slots"
-            } else {
-                $Msg = "SPACE: 0 slots"
-            }
-            $Lines += ($Indent + $Msg)
-        }
+        if ($null -ne $Delta) { $Lines += " SPACE: {0:0.##} slots $(Format-DiffString (-$Delta))" -f $Delta }
     }
     
-    # Recycling
-    $ProcessTypes = @{ "recyclesInto" = "RECYCLES INTO"; "salvagesInto" = "SALVAGES INTO" }
-    foreach ($Key in $ProcessTypes.Keys) {
-        if ($Item.$Key -and $Item.$Key.PSObject.Properties.Count -gt 0) {
-            $Lines += "---"
-            $Lines += ($Indent + "$($ProcessTypes[$Key]):")
-            $PVal = 0
-            $Item.$Key.PSObject.Properties | ForEach-Object {
-                $Lines += ($Indent + " - $($_.Value)x $(Get-ItemName $_.Name)")
-                $PVal += ($_.Value * (Get-ItemValue $_.Name))
+    # Recycling & Salvaging
+    foreach ($K in @("recyclesInto", "salvagesInto")) {
+        if ($Item.$K -and $Item.$K.PSObject.Properties.Count -gt 0) {
+            $Lines += "---"; $Lines += " $($K.Replace('Into', '').ToUpper())S INTO:"; $PVal = 0
+            foreach ($P in $Item.$K.PSObject.Properties) {
+                $Lines += "  - $($P.Value)x $(Get-ItemName $P.Name)"
+                $PVal += ($P.Value * (Get-ItemValue $P.Name))
             }
-            
-            # Diff = RecycleValue - BaseValue. Positive is Good (Green).
-            $RecycDiff = $PVal - $Val
-            $DiffStr = Format-DiffString -Value $RecycDiff -InvertColors $false
-            
-            $Lines += ($Indent + "VALUE: $($Sym.Currency) $PVal $DiffStr")
+            $Lines += " VALUE: $($Sym.Currency) $PVal $(Format-DiffString ($PVal - $Val))"
         }
     }
 
-    # Found In
-    $FoundInLines = @()
-    $LocSource = $Item.foundIn
-    
-    # Drops from Bots
-    $DroppingBots = @()
-    $BotData = if ($Global:Data.Bots.PSObject.Properties["value"]) { $Global:Data.Bots.value } else { $Global:Data.Bots }
-    if ($BotData) {
-        foreach ($Bot in $BotData) {
-            if ($Bot.drops -contains $Item.id) { $DroppingBots += $Bot.name }
+    # Sources
+    $Sources = @()
+    if ($Item.foundIn -and ($Item.foundIn -ne "ARC")) { $Sources += " - $($Item.foundIn)" }
+    $Bots = $Global:Data.Bots | Where-Object { $_.drops -contains $Item.id }
+    if ($Bots) { if ($Bots.Count -gt 4) { $Sources += " - Various ARCs ($($Bots.Count))" } else { $Bots | ForEach-Object { $Sources += " - $($_.name) (ARC)" } } }
+    $Quests = $Global:Data.Quests | Where-Object { $_.grantedItemIds.itemId -contains $Item.id }
+    if ($Quests) { if ($Quests.Count -gt 3) { $Sources += " - Various Quests ($($Quests.Count))" } else { $Quests | ForEach-Object { $Sources += " - $($_.name.en) (Quest)" } } }
+    if ($Sources) { $Lines += "---"; $Lines += " FOUND IN:"; $Lines += $Sources }
+
+    # Trades
+    $Trades = $Global:Data.Trades | Where-Object { $_.itemId -eq $Item.id }
+    if ($Trades) {
+        $Market = ($Trades | Where-Object { $_.cost.itemId -eq "coins" } | Select-Object -First 1).cost.quantity
+        $Lines += "---"; $Lines += " SOLD BY:"
+        foreach ($T in $Trades) {
+            $Limit = if ($T.dailyLimit) { "$($T.dailyLimit)x " } else { "" }
+            $Lines += " - $Limit$($T.trader)"
+            $CId = $T.cost.itemId; $CQty = $T.cost.quantity
+            if ($CId -eq "coins") { $Lines += " PRICE: $($Sym.Currency) $CQty $(Format-DiffString ($CQty - $Val) -Invert)" }
+            elseif ($CId -eq "creds") {
+                $Rate = if ($Market) { "($($Sym.Creds) 1 = $($Sym.Currency) $([math]::Round($Market/$CQty, 2)))" } else { "" }
+                $Lines += " PRICE: $($Sym.Creds) $CQty $Rate"
+            } else { $Lines += " PRICE: ${CQty}x $(Get-ItemName $CId) $(Format-DiffString ($CQty * (Get-ItemValue $CId) - $Val) -Invert)" }
         }
     }
-
-    # Rewards from Quests
-    $QuestRewards = @()
-    $QuestData = if ($Global:Data.Quests.PSObject.Properties["value"]) { $Global:Data.Quests.value } else { $Global:Data.Quests }
-    if ($QuestData) {
-        foreach ($Quest in $QuestData) {
-            if ($Quest.grantedItemIds -and ($Quest.grantedItemIds.itemId -contains $Item.id)) {
-                $QuestRewards += $Quest.name.en
-            }
-        }
-    }
-
-    if ($LocSource -and ($LocSource -ne "ARC" -or $DroppingBots.Count -eq 0)) {
-        $FoundInLines += ($Indent + " - $LocSource")
-    }
-
-    if ($DroppingBots.Count -gt 0) {
-        if ($DroppingBots.Count -gt 4) {
-            $FoundInLines += ($Indent + " - Various ARCs ($($DroppingBots.Count))")
-        } else {
-            foreach ($bn in $DroppingBots) { $FoundInLines += ($Indent + " - $bn (ARC)") }
-        }
-    }
-
-    if ($QuestRewards.Count -gt 0) {
-        if ($QuestRewards.Count -gt 3) {
-            $FoundInLines += ($Indent + " - Various Quests ($($QuestRewards.Count))")
-        } else {
-            foreach ($qn in $QuestRewards) { $FoundInLines += ($Indent + " - $qn (Quest)") }
-        }
-    }
-
-    if ($FoundInLines.Count -gt 0) {
-        $Lines += "---"
-        $Lines += ($Indent + "FOUND IN:")
-        $Lines += $FoundInLines
-    }
-
-    # Sold By (Trades)
-    $TradesData = if ($Global:Data.Trades.PSObject.Properties["value"]) { $Global:Data.Trades.value } else { $Global:Data.Trades }
-    $ItemTrades = $TradesData | Where-Object { $_.itemId -eq $Item.id }
-    
-    if ($ItemTrades) {
-        # Determine Market Value (Coins) if available
-        $CoinTrade = $ItemTrades | Where-Object { $_.cost.itemId -eq "coins" } | Select-Object -First 1
-        $MarketValue = if ($CoinTrade) { $CoinTrade.cost.quantity } else { $null }
-        
-        $Lines += "---"
-        $Lines += ($Indent + "SOLD BY:")
-        foreach ($Trade in $ItemTrades) {
-            $Trader = $Trade.trader
-            $LimitStr = if ($Trade.dailyLimit) { "$($Trade.dailyLimit)x " } else { "" }
-            $Lines += ($Indent + " - $LimitStr$Trader")
-            
-            $CostId = $Trade.cost.itemId
-            $CostQty = $Trade.cost.quantity
-            
-            if ($CostId -eq "coins") {
-                $Diff = $CostQty - $Val
-                $DiffStr = Format-DiffString -Value $Diff -InvertColors $true
-                $Lines += ($Indent + "PRICE: $($Sym.Currency) $CostQty $DiffStr")
-            } elseif ($CostId -eq "creds") {
-                $ExchStr = ""
-                if ($MarketValue) {
-                    $Rate = [math]::Round($MarketValue / $CostQty, 2)
-                    $ExchStr = "($($Sym.Creds) 1 = $($Sym.Currency) $Rate)"
-                }
-                $Lines += ($Indent + "PRICE: $($Sym.Creds) $CostQty $ExchStr")
-            } else {
-                # Barter
-                $CostItemVal = Get-ItemValue $CostId
-                $TotalCostVal = $CostQty * $CostItemVal
-                $Diff = $TotalCostVal - $Val
-                
-                # Barter Diff Format: (⦶ +50)
-                $Sign = if ($Diff -gt 0) { "+" } else { "" }
-                $Color = $Palette.Text
-                if ($Diff -gt 0) { $Color = $Palette.Error }
-                elseif ($Diff -lt 0) { $Color = $Palette.Success }
-                
-                $DiffDisplay = "($($Sym.Currency) $Esc[${Color}m$Sign$Diff$Esc[0m)"
-                $CostName = Get-ItemName $CostId
-                $Lines += ($Indent + "PRICE: ${CostQty}x $CostName $DiffDisplay")
-            }
-        }
-    }
-    
-    Show-Card -Title $Item.name.en -Subtitle "Item" -Content $Lines -ThemeColor $RarityColor -BorderColor $RarityColor
+    Show-Card -Title $Item.name.en -Subtitle "Item" -Content $Lines -ThemeColor $Color -BorderColor $Color
 }
 
 function Show-Bot {
@@ -983,190 +762,121 @@ function Show-Skill {
     Show-Card -Title $Skill.name.en -Subtitle "Skill" -Content $Lines -ThemeColor $CatColor -BorderColor $CatColor
 }
 
-function Show-Events {
-    if (-not (Test-Path $PathEvents)) { Write-Ansi "Event data missing." $Palette.Error; return }
-    
-    $Data = Import-JsonFast $PathEvents
-    $Sched = $Data.schedule
-    $Types = $Data.eventTypes
-    
-    # 1. Setup Time Base (Top of current hour)
-    $TimeNow = [DateTime]::UtcNow
-    $BaseTime = [DateTime]::new($TimeNow.Year, $TimeNow.Month, $TimeNow.Day, $TimeNow.Hour, 0, 0, [System.DateTimeKind]::Utc)
-    
-    # 2. Config & Colors
-    $W_Time = 7
-    $W_Events = 60
-    $W_Total = $W_Time + $W_Events + 3 # Borders
-    
-    # Map Colors (Text / Bg)
-    # Bg colors: 40=Black, 41=Red, 42=Green, 43=Yellow, 44=Blue, 45=Magenta, 46=Cyan, 47=White, 100=BrBlack
-    $MapColors = @{
-        "blue-gate"        = @{ Text="34"; Bg="44" } # Blue
-        "buried-city"      = @{ Text="33"; Bg="43" } # Yellow
-        "dam-battleground" = @{ Text="90"; Bg="100" } # Grey (BrBlack)
-        "the-spaceport"    = @{ Text="31"; Bg="41" } # Red
-        "stella-montis"    = @{ Text="36"; Bg="46" } # Cyan
+function Show-Quest {
+    param ($Quest)
+    $Lines = @("TRADER: $($Quest.trader)", "---")
+    if ($Quest.objectives) {
+        $Lines += "OBJECTIVES:"
+        foreach ($O in $Quest.objectives) {
+            if ($O.en) { $Lines += (Get-WrappedText "[ ] $($O.en)" -Indent " ") }
+        }
     }
-    
-    # Header
-    Write-BoxRow $Sym.Box.TL $Sym.Box.H $Sym.Box.TR $Palette.Border $W_Total
-    
-    # Inverted Title (Reverse Video = 7)
-    $Title = " UPCOMING SCHEDULE "
-    $PadTotal = $W_Total - 2 - $Title.Length
-    $PadL = [math]::Floor($PadTotal / 2)
-    $PadR = [math]::Ceiling($PadTotal / 2)
-    
-    Write-Ansi $Sym.Box.V $Palette.Border -NoNewline
-    Write-Ansi ([string]::new(" ", $PadL)) -NoNewline
-    Write-Ansi $Title "7" -NoNewline # 7 = Reverse Video
-    Write-Ansi ([string]::new(" ", $PadR)) -NoNewline
-    Write-Ansi $Sym.Box.V $Palette.Border
-    
-    # Header Separator (Top T)
-    $SepHeader = "$($Sym.Box.L)$([string]::new($Sym.Box.H, $W_Time))$($Sym.Box.T)$([string]::new($Sym.Box.H, $W_Events))$($Sym.Box.R)"
-    Write-Ansi $SepHeader $Palette.Border
-    
-    # 3. Scan for Next Occurrence of each Event
-    $NextEvents = @{} # Key: EventName -> Object
+    if ($Quest.grantedItemIds) {
+        $Lines += "---"
+        $Lines += "REWARDS:"
+        foreach ($R in $Quest.grantedItemIds) {
+            $Lines += " - $($R.quantity)x $(Get-ItemName $R.itemId)"
+        }
+    }
+    Show-Card -Title $Quest.name.en -Subtitle "Quest" -Content $Lines -ThemeColor $Palette.Accent
+}
+
+function Show-Hideout {
+    param ($Hideout)
+    $Lines = @()
+    foreach ($L in $Hideout.levels) {
+        if ($Lines.Count -gt 0) { $Lines += "---" }
+        $Lines += "LEVEL $($L.level):"
+        if ($L.requirementItemIds) {
+            foreach ($Req in $L.requirementItemIds) {
+                $Lines += " - $($Req.quantity)x $(Get-ItemName $Req.itemId)"
+            }
+        }
+    }
+    Show-Card -Title $Hideout.name.en -Subtitle "Hideout" -Content $Lines -ThemeColor $Palette.Accent
+}
+
+function Get-UpcomingEvents {
+    param ($Sched, $Types)
+    $BaseTime = [DateTime]::UtcNow.Date.AddHours([DateTime]::UtcNow.Hour)
+    $NextEvents = @{}
     
     for ($i = 0; $i -lt 24; $i++) {
         $TargetTime = $BaseTime.AddHours($i)
-        $TargetHour = $TargetTime.Hour
+        $Hour = $TargetTime.Hour
         
         foreach ($MapKey in $Sched.PSObject.Properties.Name) {
-            # Helper to process event
-            $Process = {
-                param($Key, $Cat)
+            foreach ($Cat in @("major", "minor")) {
+                $Key = $Sched.$MapKey.$Cat."$Hour"
                 if ($Key -and $Types.$Key -and -not $Types.$Key.disabled) {
-                    $N = $Types.$Key.displayName
-                    if (-not $NextEvents.ContainsKey($N)) {
-                        $NextEvents[$N] = [PSCustomObject]@{
-                            Name = $N
-                            MapKey = $MapKey
-                            Cat = $Cat
+                    $Name = $Types.$Key.displayName
+                    if (-not $NextEvents.ContainsKey($Name)) {
+                        $NextEvents[$Name] = [PSCustomObject]@{
+                            Name     = $Name
+                            MapKey   = $MapKey
+                            Cat      = $Cat
                             TimeSort = $i
-                            TimeStr = if ($i -eq 0) { "NOW" } else { $TargetTime.ToLocalTime().ToString("HH:mm") }
+                            TimeStr  = if ($i -eq 0) { "NOW" } else { $TargetTime.ToLocalTime().ToString("HH:mm") }
                         }
                     }
                 }
             }
-            
-            # Check Major & Minor
-            & $Process $Sched.$MapKey.major."$TargetHour" "major"
-            & $Process $Sched.$MapKey.minor."$TargetHour" "minor"
         }
     }
+    return $NextEvents.Values | Group-Object TimeSort | Sort-Object { [int]$_.Name }
+}
+
+function Show-Events {
+    if (-not (Test-Path $PathEvents)) { Write-Ansi "Event data missing." $Palette.Error; return }
+    $Data = Import-JsonFast $PathEvents
+    $Groups = Get-UpcomingEvents -Sched $Data.schedule -Types $Data.eventTypes
     
-    # 4. Group and Display
-    $Groups = $NextEvents.Values | Group-Object TimeSort | Sort-Object { [int]$_.Name }
+    $W_Time = 7; $W_Events = 60; $W_Total = $W_Time + $W_Events + 3
+    $MapColors = @{
+        "blue-gate" = @{ T="34"; B="44" }; "buried-city" = @{ T="33"; B="43" }; "dam-battleground" = @{ T="90"; B="100" }
+        "the-spaceport" = @{ T="31"; B="41" }; "stella-montis" = @{ T="36"; B="46" }
+    }
     
-    $FirstRow = $true
+    Write-BoxRow $Sym.Box.TL $Sym.Box.H $Sym.Box.TR $Palette.Border $W_Total
+    Write-ContentRow " UPCOMING SCHEDULE " -TextColor "7" -Width $W_Total -Align Center
+    Write-Ansi "$($Sym.Box.L)$([string]::new($Sym.Box.H, $W_Time))$($Sym.Box.T)$([string]::new($Sym.Box.H, $W_Events))$($Sym.Box.R)" $Palette.Border
+
+    $First = $true
     foreach ($Grp in $Groups) {
-        if (-not $FirstRow) {
-             # Middle Separator (Cross)
-             Write-Ansi "$($Sym.Box.L)$([string]::new($Sym.Box.H, $W_Time))$($Sym.Box.C)$([string]::new($Sym.Box.H, $W_Events))$($Sym.Box.R)" $Palette.Border
-        }
-        $FirstRow = $false
+        if (-not $First) { Write-Ansi "$($Sym.Box.L)$([string]::new($Sym.Box.H, $W_Time))$($Sym.Box.C)$([string]::new($Sym.Box.H, $W_Events))$($Sym.Box.R)" $Palette.Border }
+        $First = $false
         
-        $TimeStr = $Grp.Group[0].TimeStr
-        
-        # Sort events in this time slot? Alphabetical or Major first?
-        # Let's do Major first, then Alphabetical
-        $EventsInSlot = $Grp.Group | Sort-Object @{Expression="Cat"; Descending=$false}, "Name"
-        
-        $EventStrings = @()
-        foreach ($Ev in $EventsInSlot) {
-            $Cols = $MapColors[$Ev.MapKey]
-            if (-not $Cols) { $Cols = @{ Text="37"; Bg="40" } }
-            
-            if ($Ev.Cat -eq "major") {
-                $EventStrings += "$([char]27)[$($Cols.Bg);30m $($Ev.Name) $([char]27)[0m"
-            } else {
-                $EventStrings += "$([char]27)[$($Cols.Text)m$($Ev.Name)$([char]27)[0m"
-            }
+        $Events = $Grp.Group | Sort-Object @{Expression="Cat"; Descending=$false}, "Name"
+        $Strings = foreach ($E in $Events) {
+            $C = if ($MapColors.ContainsKey($E.MapKey)) { $MapColors[$E.MapKey] } else { @{ T="37"; B="40" } }
+            if ($E.Cat -eq "major") { "$Esc[$($C.B);30m $($E.Name) $Esc[0m" } else { "$Esc[$($C.T)m$($E.Name)$Esc[0m" }
         }
         
-        # Wrap Logic
-        $VisLen = 0
-        $Buffer = @()
-        $LinesToPrint = @()
-        
-        for ($k=0; $k -lt $EventStrings.Count; $k++) {
-            $Seg = $EventStrings[$k]
-            $SegClean = $Seg -replace "\x1B\[[0-9;]*[a-zA-Z]", ""
-            $SepLen = if ($Buffer.Count -gt 0) { 2 } else { 0 }
-            $AddLen = $SegClean.Length + $SepLen
-            
-            if (($VisLen + $AddLen) -gt ($W_Events - 2)) {
-                $LinesToPrint += ($Buffer -join ", ")
-                $Buffer = @($Seg)
-                $VisLen = $SegClean.Length
-            } else {
-                $Buffer += $Seg
-                $VisLen += $AddLen
-            }
+        $Lines = @(); $Buffer = @(); $Len = 0
+        foreach ($S in $Strings) {
+            $Sep = if ($Buffer.Count -gt 0) { 2 } else { 0 }
+            $CLen = (Get-DisplayLength $S) + $Sep
+            if (($Len + $CLen) -gt ($W_Events - 2)) { $Lines += ($Buffer -join ", "); $Buffer = @($S); $Len = (Get-DisplayLength $S) }
+            else { $Buffer += $S; $Len += $CLen }
         }
-        if ($Buffer.Count -gt 0) { $LinesToPrint += ($Buffer -join ", ") }
+        if ($Buffer.Count -gt 0) { $Lines += ($Buffer -join ", ") }
         
-        # Print Rows
-        for ($k=0; $k -lt $LinesToPrint.Count; $k++) {
-            $RowTime = if ($k -eq 0) { $TimeStr } else { "" }
-            $RowContent = $LinesToPrint[$k]
-            
+        for ($i=0; $i -lt $Lines.Count; $i++) {
+            $T = if ($i -eq 0) { $Grp.Group[0].TimeStr } else { "" }
             Write-Ansi $Sym.Box.V $Palette.Border -NoNewline
-            Write-Ansi $RowTime.PadRight($W_Time) $Theme.Reset -NoNewline # Time in Default Color
+            Write-Ansi $T.PadRight($W_Time) $Theme.Reset -NoNewline
             Write-Ansi $Sym.Box.V $Palette.Border -NoNewline
-            
-            $CleanContent = $RowContent -replace "\x1B\[[0-9;]*[a-zA-Z]", ""
-            $PadRight = $W_Events - $CleanContent.Length
-            if ($PadRight -lt 0) { $PadRight = 0 }
-            
-            Write-Ansi $RowContent -NoNewline
-            if ($PadRight -gt 0) { Write-Ansi ([string]::new(" ", $PadRight)) -NoNewline }
+            $Content = $Lines[$i]; $Pad = [math]::Max(0, $W_Events - (Get-DisplayLength $Content))
+            Write-Ansi "$Content$(' '*$Pad)" $Theme.Reset -NoNewline
             Write-Ansi $Sym.Box.V $Palette.Border
         }
     }
-    
-    # Bottom (Bottom T)
-    $BotRow = "$($Sym.Box.BL)$([string]::new($Sym.Box.H, $W_Time))$($Sym.Box.B)$([string]::new($Sym.Box.H, $W_Events))$($Sym.Box.BR)"
-    Write-Ansi $BotRow $Palette.Border
+    Write-Ansi "$($Sym.Box.BL)$([string]::new($Sym.Box.H, $W_Time))$($Sym.Box.B)$([string]::new($Sym.Box.H, $W_Events))$($Sym.Box.BR)" $Palette.Border
 }
 
 # -----------------------------------------------------------------------------
 # MAIN CONTROLLER
 # -----------------------------------------------------------------------------
-
-function Show-Quest {
-    param ($Quest)
-    $C = @("TRADER: $($Quest.trader)", "---")
-    if ($Quest.objectives) {
-        $C += "OBJECTIVES:"
-        foreach($o in $Quest.objectives){
-            if($o.en){
-                $Obj = "[ ] $($o.en)"
-                $C += (Get-WrappedText $Obj -Indent " ")
-            }
-        }
-    }
-    Show-Card -Title $Quest.name.en -Subtitle "Quest" -Content $C -ThemeColor $Palette.Accent
-}
-
-function Show-Hideout {
-    param ($Hideout)
-    $C = @()
-    foreach($L in $Hideout.levels){
-        if ($C.Count -gt 0) { $C += "---" }
-        $C += "LEVEL $($L.level):"
-        if ($L.requirementItemIds) {
-            foreach ($Req in $L.requirementItemIds) {
-                $C += "  - $($Req.quantity)x $(Get-ItemName $Req.itemId)"
-            }
-        }
-    }
-    Show-Card -Title $Hideout.name.en -Subtitle "Hideout" -Content $C -ThemeColor $Palette.Accent
-}
 
 function Invoke-DisplayResult {
     param ($Result)
@@ -1185,53 +895,32 @@ function Invoke-DisplayResult {
 }
 
 function Show-Help {
-    Write-BoxRow $Sym.Box.TL $Sym.Box.H $Sym.Box.TR $Palette.Border $W_Events
-    
-    $Title = " ARC RAIDERS CLI "
-    $PadTotal = $W_Events - 2 - $Title.Length
-    $PadL = [math]::Floor($PadTotal / 2)
-    $PadR = [math]::Ceiling($PadTotal / 2)
-    
-    Write-Ansi $Sym.Box.V $Palette.Border -NoNewline
-    Write-Ansi ([string]::new(" ", $PadL)) -NoNewline
-    Write-Ansi $Title "7" -NoNewline
-    Write-Ansi ([string]::new(" ", $PadR)) -NoNewline
-    Write-Ansi $Sym.Box.V $Palette.Border
-
-    Write-BoxRow $Sym.Box.L $Sym.Box.H $Sym.Box.R $Palette.Border $W_Events
-
-    $HelpLines = @(
-        "Usage: arc <Query> [Index]",
-        "",
+    param ($Width = 60)
+    Write-BoxRow $Sym.Box.TL $Sym.Box.H $Sym.Box.TR $Palette.Border $Width
+    Write-ContentRow " ARC RAIDERS CLI " -TextColor "7" -Width $Width -Align Center
+    Write-BoxRow $Sym.Box.L $Sym.Box.H $Sym.Box.R $Palette.Border $Width
+    $Help = @(
+        "Usage: arc <Query> [Index]", "",
         "COMMANDS:",
-        "  update          Check and install updates",
-        "  events          Check event rotation",
-        "  <Query>         Search game data"
-        "",
+        "  update       Check and install updates",
+        "  events       Check event rotation",
+        "  <Query>      Search game data", "",
         "EXAMPLES:",
-        "  arc             Display this help text"
-        "  arc update      Check and install updates",
-        "  arc events      Check event rotation",
-        "  arc Cat Bed     Search for 'Cat Bed'",
-        "  arc cat 0       View the first result for 'cat'",
-        "",
+        "  arc          Display this help text",
+        "  arc update   Check and install updates",
+        "  arc events   Check event rotation",
+        "  arc Cat Bed  Search for 'Cat Bed'",
+        "  arc cat 0    View first result for 'cat'", "",
         "TIPS:",
-        "  - Use 'arc' from anywhere after running install.bat",
-        "  - Select results using number keys (0-9)",
-        "      or optional index argument",
-        "  - Quotes are optional for multi-word searches"
+        "  - Use 'arc' from anywhere after install",
+        "  - Selection: number keys (0-9) or index arg",
+        "  - Multi-word searches don't need quotes"
     )
-
-    foreach ($Line in $HelpLines) {
-        Write-ContentRow -Text $Line -Width $W_Events -BorderColor $Palette.Border
-    }
-    
-    Write-BoxRow $Sym.Box.BL $Sym.Box.H $Sym.Box.BR $Palette.Border $W_Events
+    foreach ($L in $Help) { Write-ContentRow $L -Width $Width }
+    Write-BoxRow $Sym.Box.BL $Sym.Box.H $Sym.Box.BR $Palette.Border $Width
 }
 
 if ([string]::IsNullOrWhiteSpace($Query)) {
-    # Define widths for Help function scope
-    $W_Events = 60
     Show-Help
 } elseif ($Query -eq "update") {
     if ($null -ne $UpdateJob) { Remove-Job -Job $UpdateJob -Force }
@@ -1241,54 +930,24 @@ if ([string]::IsNullOrWhiteSpace($Query)) {
     Show-Events
 } else {
     Initialize-Data -ShowStatus
-
     $Results = @()
 
-    # 1. Search Items
-    $ItemData = if ($Global:Data.Items -is [hashtable]) { $Global:Data.Items.Values } else { $Global:Data.Items.PSObject.Properties.Value }
-    foreach ($Item in $ItemData) {
-        if ($Item.name.en -like "*$Query*" -or $Item.id -eq $Query) {
-            $Results += [PSCustomObject]@{ Type="Item"; Name=$Item.name.en; Data=$Item }
-        }
-    }
+    # Generic Search
+    $SearchConfig = @(
+        @{ Data = $Global:Data.Items.Values; Type = "Item";    Name = { $_.name.en }; Id = "id" }
+        @{ Data = $Global:Data.Quests;       Type = "Quest";   Name = { $_.name.en } }
+        @{ Data = $Global:Data.Hideout;      Type = "Hideout"; Name = { $_.name.en } }
+        @{ Data = $Global:Data.Bots;         Type = "ARC";     Name = { $_.name } }
+        @{ Data = $Global:Data.Projects;     Type = "Project"; Name = { $_.name.en } }
+        @{ Data = $Global:Data.Skills;       Type = "Skill";   Name = { $_.name.en } }
+    )
 
-    # 2. Search Quests
-    $QuestData = if ($Global:Data.Quests.PSObject.Properties["value"]) { $Global:Data.Quests.value } else { $Global:Data.Quests }
-    foreach ($Quest in $QuestData) {
-        if ($Quest.name.en -like "*$Query*") {
-            $Results += [PSCustomObject]@{ Type="Quest"; Name=$Quest.name.en; Data=$Quest }
-        }
-    }
-
-    # 3. Search Hideout
-    $HideoutData = if ($Global:Data.Hideout.PSObject.Properties["value"]) { $Global:Data.Hideout.value } else { $Global:Data.Hideout }
-    foreach ($Hideout in $HideoutData) {
-        if ($Hideout.name.en -like "*$Query*") {
-            $Results += [PSCustomObject]@{ Type="Hideout"; Name=$Hideout.name.en; Data=$Hideout }
-        }
-    }
-
-    # 4. Search Bots
-    $BotData = if ($Global:Data.Bots.PSObject.Properties["value"]) { $Global:Data.Bots.value } else { $Global:Data.Bots }
-    foreach ($Bot in $BotData) {
-        if ($Bot.name -like "*$Query*") {
-            $Results += [PSCustomObject]@{ Type="ARC"; Name=$Bot.name; Data=$Bot }
-        }
-    }
-
-    # 5. Search Projects
-    $ProjData = if ($Global:Data.Projects.PSObject.Properties["value"]) { $Global:Data.Projects.value } else { $Global:Data.Projects }
-    foreach ($Proj in $ProjData) {
-        if ($Proj.name.en -like "*$Query*") {
-            $Results += [PSCustomObject]@{ Type="Project"; Name=$Proj.name.en; Data=$Proj }
-        }
-    }
-
-    # 6. Search Skills
-    $SkillData = if ($Global:Data.Skills.PSObject.Properties["value"]) { $Global:Data.Skills.value } else { $Global:Data.Skills }
-    foreach ($Skill in $SkillData) {
-        if ($Skill.name.en -like "*$Query*") {
-            $Results += [PSCustomObject]@{ Type="Skill"; Name=$Skill.name.en; Data=$Skill }
+    foreach ($Cfg in $SearchConfig) {
+        foreach ($Obj in $Cfg.Data) {
+            $Val = $Obj | ForEach-Object $Cfg.Name
+            if ($Val -and ($Val -like "*$Query*" -or ($Cfg.Id -and $Obj.$($Cfg.Id) -eq $Query))) {
+                $Results += [PSCustomObject]@{ Type = $Cfg.Type; Name = $Val; Data = $Obj }
+            }
         }
     }
 
@@ -1305,21 +964,11 @@ if ([string]::IsNullOrWhiteSpace($Query)) {
         if ($SelectIndex -ge 0 -and $SelectIndex -lt $Results.Count) {
             $Idx = $SelectIndex
         } else {
-            $W_Results = 60
-            Write-BoxRow $Sym.Box.TL $Sym.Box.H $Sym.Box.TR $Palette.Border $W_Results
-            Write-ContentRow -Text "SEARCH RESULTS" -TextColor $Palette.Accent -Width $W_Results -Align "Center"
-            Write-BoxRow $Sym.Box.L $Sym.Box.H $Sym.Box.R $Palette.Border $W_Results
-
-            for ($i=0; $i -lt $Results.Count; $i++) {
-                if ($i -ge 20) {
-                    Write-ContentRow -Text "... and more" -TextColor $Palette.Subtext -Width $W_Results
-                    break
-                }
-                $ResultLine = " [$i] $($Results[$i].Name) ($($Results[$i].Type))"
-                Write-ContentRow -Text $ResultLine -Width $W_Results
+            $ResLines = for ($i=0; $i -lt $Results.Count; $i++) {
+                if ($i -ge 20) { "---"; " ... and more"; break }
+                " [$i] $($Results[$i].Name) ($($Results[$i].Type))"
             }
-            
-            Write-BoxRow $Sym.Box.BL $Sym.Box.H $Sym.Box.BR $Palette.Border $W_Results
+            Show-Card -Title "SEARCH RESULTS" -Content $ResLines -ThemeColor $Palette.Accent
             Write-Ansi "`nSelect (0-$($Results.Count - 1)): " $Palette.Accent -NoNewline
             
             try {
