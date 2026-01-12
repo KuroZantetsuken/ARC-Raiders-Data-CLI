@@ -94,7 +94,9 @@ $UpdateJob = if ($CurrentVersion -ne "vDEV") {
         param($Ver)
         try {
             $Latest = Invoke-RestMethod -Uri "https://api.github.com/repos/KuroZantetsuken/ARC-Raiders-CLI/releases/latest" -ErrorAction SilentlyContinue
-            if ($Latest.tag_name -and $Latest.tag_name -ne $Ver) { return $Latest.tag_name }
+            if ($Latest.tag_name -and $Latest.tag_name -ne $Ver) {
+                return @{ Version = $Latest.tag_name; Url = $Latest.html_url }
+            }
         } catch {}
         return $null
     } -ArgumentList $CurrentVersion
@@ -348,14 +350,15 @@ function Show-Card {
 }
 
 function Show-UpdateBanner {
-    param ($NewVersion)
+    param ($NewVersion, $Url)
     $Lines = @(
         "A new update is available: $NewVersion",
         "Your current version: $CurrentVersion",
         "",
         "Run 'arc update' to install it automatically."
     )
-    Show-Card -Title "UPDATE AVAILABLE" -Subtitle "https://github.com/KuroZantetsuken/ARC-Raiders-CLI" -Content $Lines -ThemeColor $Palette.Warning -BorderColor $Palette.Warning
+    $DisplayUrl = if ($Url) { $Url } else { "https://github.com/KuroZantetsuken/ARC-Raiders-CLI" }
+    Show-Card -Title "UPDATE AVAILABLE" -Subtitle $DisplayUrl -Content $Lines -ThemeColor $Palette.Warning -BorderColor $Palette.Warning
 }
 
 function Update-ArcRaidersCLI {
@@ -378,6 +381,21 @@ function Update-ArcRaidersCLI {
 
         Write-Ansi "Updating to $($Latest.tag_name)..." $Palette.Accent
         
+        # Display Changelog
+        if ($Latest.body) {
+            $ChangelogLines = @()
+            $RawLines = $Latest.body -split "`r?`n"
+            foreach ($Line in $RawLines) {
+                if ([string]::IsNullOrWhiteSpace($Line)) { $ChangelogLines += ""; continue }
+                $ChangelogLines += Get-WrappedText -Text $Line -Indent " "
+            }
+            # Limit changelog height if it's too long
+            if ($ChangelogLines.Count -gt 20) {
+                $ChangelogLines = $ChangelogLines[0..18] + @("---", " ... and more (see GitHub for full notes)")
+            }
+            Show-Card -Title "RELEASE NOTES" -Subtitle $Latest.html_url -Content $ChangelogLines -ThemeColor $Palette.Accent -BorderColor $Palette.Border
+        }
+
         # Use a local temp directory for reliability
         $TempDir = Join-Path $RepoRoot ".update_tmp"
         if (Test-Path $TempDir) { Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue }
@@ -1060,8 +1078,12 @@ if ($null -ne $UpdateJob) {
     }
 
     if ($UpdateJob.State -eq "Completed") {
-        $NewVer = Receive-Job -Job $UpdateJob
-        if ($NewVer) { Show-UpdateBanner -NewVersion $NewVer }
+        $UpdateInfo = Receive-Job -Job $UpdateJob
+        if ($UpdateInfo -and $UpdateInfo.Version) {
+            Show-UpdateBanner -NewVersion $UpdateInfo.Version -Url $UpdateInfo.Url
+        } elseif ($UpdateInfo -is [string]) {
+            Show-UpdateBanner -NewVersion $UpdateInfo
+        }
     }
     
     # Cleanup background job
