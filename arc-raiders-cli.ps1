@@ -56,20 +56,6 @@ $PathItems, $PathQuests, $PathHideout, $PathEvents, $PathBots, $PathProjects, $P
 ) | ForEach-Object { Join-Path $DataDir $_ }
 $GlobalCache = Join-Path $RepoRoot ".cache"
 
-# Check for Data Submodule
-if (-not (Test-Path $PathItems)) {
-    if (Test-Path (Join-Path $RepoRoot ".git")) {
-        Write-Host "`n[!] Data missing. Initializing submodule..." -ForegroundColor Yellow
-        try {
-            Start-Process git -ArgumentList "submodule update --init --recursive" -Wait -NoNewWindow
-            if (Test-Path $PathItems) { Write-Host "[+] Data initialized. Please re-run command." -ForegroundColor Green }
-            else { Write-Host "[!] Failed to initialize submodule. Run: git submodule update --init --recursive" -ForegroundColor Red }
-        } catch { Write-Host "[!] Error: $($_.Exception.Message)" -ForegroundColor Red }
-    } else {
-        Write-Host "[!] Error: Data directory missing." -ForegroundColor Red
-    }
-    exit
-}
 
 # Parse Arguments
 $Query = ""; $SelectIndex = -1
@@ -316,6 +302,147 @@ function Show-UpdateBanner {
     Show-Card -Title "UPDATE AVAILABLE" -Content $Lines -ThemeColor $Palette.Warning -BorderColor $Palette.Warning
 }
 
+function Update-Data {
+    param ([switch]$Silent)
+    if (-not $Silent) { Write-Ansi "Checking for data updates..." $Palette.Accent }
+    
+    try {
+        $DataRepo = "RaidTheory/arcraiders-data"
+        $Latest = Invoke-RestMethod -Uri "https://api.github.com/repos/$DataRepo/commits/main" -ErrorAction Stop
+        
+        $DataVerFile = Join-Path $DataDir ".version"
+        $CurrentDataVer = if (Test-Path $DataVerFile) { (Get-Content $DataVerFile -Raw).Trim() } else { "" }
+        
+        if ($Latest.sha -eq $CurrentDataVer) {
+            if (-not $Silent) { Write-Ansi "Data is already up to date." $Palette.Success }
+            return
+        }
+
+        if (-not $Silent) { Write-Ansi "Updating game data to $($Latest.sha.Substring(0,7))..." $Palette.Accent }
+
+        $FilesToDownload = @()
+        $FilesToDelete = @()
+
+        if ([string]::IsNullOrWhiteSpace($CurrentDataVer)) {
+            # 1. Fresh install: Get all files via Tree API
+            if (-not $Silent) { Write-Ansi "Fetching data tree..." $Palette.Subtext }
+            $Tree = Invoke-RestMethod -Uri "https://api.github.com/repos/$DataRepo/git/trees/main?recursive=1" -ErrorAction Stop
+            $FilesToDownload = if ($null -ne $Tree -and $null -ne $Tree.tree) { $Tree.tree | Where-Object { $_.path -like "*.json" -or $_.path -eq "LICENSE" } | ForEach-Object { $_.path } } else { @() }
+        } else {
+            # 2. Incremental update: Get changes via Compare API
+            if (-not $Silent) { Write-Ansi "Calculating changes..." $Palette.Subtext }
+            $Compare = Invoke-RestMethod -Uri "https://api.github.com/repos/$DataRepo/compare/$CurrentDataVer...main" -ErrorAction Stop
+            
+            # If there are too many changes, the Compare API might be truncated (limit 300)
+            if ($Compare.total_commits -gt 0 -and (-not $Compare.files -or $Compare.files.Count -eq 0)) {
+                 # Fallback to Tree API if Compare API is insufficient
+                 $Tree = Invoke-RestMethod -Uri "https://api.github.com/repos/$DataRepo/git/trees/main?recursive=1" -ErrorAction Stop
+                 $FilesToDownload = if ($null -ne $Tree -and $null -ne $Tree.tree) { $Tree.tree | Where-Object { $_.path -like "*.json" -or $_.path -eq "LICENSE" } | ForEach-Object { $_.path } } else { @() }
+            } else {
+                foreach ($F in $Compare.files) {
+                    if ($F.filename -like "*.json" -or $F.filename -eq "LICENSE") {
+                        if ($F.status -eq "removed") { $FilesToDelete += $F.filename }
+                        else {
+                            $FilesToDownload += $F.filename
+                            if ($F.status -eq "renamed") { $FilesToDelete += $F.previous_filename }
+                        }
+                    }
+                }
+            }
+        }
+
+        if ($FilesToDownload.Count -eq 0 -and $FilesToDelete.Count -eq 0) {
+            $Latest.sha | Set-Content $DataVerFile -Force
+            if (-not $Silent) { Write-Ansi "Data is already up to date." $Palette.Success }
+            return
+        }
+
+        # Perform deletions
+        foreach ($Path in $FilesToDelete) {
+            $LocalPath = Join-Path $DataDir $Path
+            if (Test-Path $LocalPath) { Remove-Item $LocalPath -Force }
+        }
+
+        # Perform downloads
+        $Total = $FilesToDownload.Count
+        if ($Total -gt 0) {
+            # Pre-create directory structure to avoid race conditions in parallel mode
+            $FilesToDownload | ForEach-Object {
+                $Dest = Join-Path $DataDir $_
+                $DestFolder = Split-Path $Dest -Parent
+                if (-not (Test-Path $DestFolder)) { New-Item -Path $DestFolder -ItemType Directory -Force | Out-Null }
+            }
+
+            if ($PSVersionTable.PSVersion.Major -ge 7) {
+                # Modern PowerShell: High-speed parallel downloads
+                if (-not $Silent) { Write-Ansi "Downloading $Total files in parallel..." $Palette.Subtext }
+                $FilesToDownload | ForEach-Object -ThrottleLimit 20 -Parallel {
+                    $Path = $_
+                    $DataDir = $using:DataDir
+                    $DataRepo = $using:DataRepo
+                    
+                    $Dest = Join-Path $DataDir $Path
+                    $Url = "https://raw.githubusercontent.com/$DataRepo/main/$Path"
+                    
+                    if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+                        # Using curl if available as it's often faster than Invoke-WebRequest
+                        curl.exe -s -L -f -o "$Dest" "$Url"
+                    } else {
+                        Invoke-WebRequest -Uri $Url -OutFile $Dest -ErrorAction Stop
+                    }
+                }
+            } else {
+                # Legacy PowerShell: Sequential downloads with progress
+                $Count = 0
+                foreach ($Path in $FilesToDownload) {
+                    $Count++
+                    if (-not $Silent) {
+                        $Percent = [math]::Round(($Count / $Total) * 100)
+                        Write-Progress -Activity "Downloading Game Data" -Status "Fetching $Path ($Count/$Total)" -PercentComplete $Percent
+                    }
+
+                    $Dest = Join-Path $DataDir $Path
+                    $Url = "https://raw.githubusercontent.com/$DataRepo/main/$Path"
+                    
+                    if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+                        curl.exe -s -L -f -o "$Dest" "$Url"
+                    } else {
+                        Invoke-WebRequest -Uri $Url -OutFile $Dest -ErrorAction Stop
+                    }
+                }
+            }
+        }
+
+        if (-not $Silent) { Write-Progress -Activity "Downloading Game Data" -Completed }
+
+        # Write version file
+        $Latest.sha | Set-Content $DataVerFile -Force
+        
+        # Invalidate cache
+        if (Test-Path $GlobalCache) { Remove-Item $GlobalCache -Force -ErrorAction SilentlyContinue }
+        
+        if (-not $Silent) { Write-Ansi "Data update complete! ($Total files updated)" $Palette.Success }
+    } catch {
+        if (-not $Silent) { Write-Progress -Activity "Downloading Game Data" -Completed }
+        Write-Ansi "Data update failed: $($_.Exception.Message)" $Palette.Error
+    }
+}
+
+function Confirm-Data {
+    if (-not (Test-Path $PathItems)) {
+        if ($CurrentVersion -eq "vDEV") {
+            Write-Host "`n[!] Data missing. Since you are in vDEV mode, please run:" -ForegroundColor Yellow
+            Write-Host "    git submodule update --init --recursive" -ForegroundColor Cyan
+        } else {
+            Write-Host "`n[!] Data missing. Downloading latest game data..." -ForegroundColor Yellow
+            Update-Data
+            if (Test-Path $PathItems) { Write-Host "[+] Data initialized.`n" -ForegroundColor Green }
+            else { Write-Host "[!] Failed to download data. Please check your connection and run 'arc update'." -ForegroundColor Red }
+        }
+        if (-not (Test-Path $PathItems)) { exit }
+    }
+}
+
 # -----------------------------------------------------------------------------
 # UI COMPONENTS
 # -----------------------------------------------------------------------------
@@ -543,6 +670,7 @@ function Initialize-Data {
     param ([switch]$ShowStatus)
 
     if ($Global:DataLoaded) { return }
+    Confirm-Data
 
     # Check Cache Validity
     $NeedsRebuild = $true
@@ -944,6 +1072,7 @@ function Get-UpcomingEvents {
 }
 
 function Show-Events {
+    Confirm-Data
     if (-not (Test-Path $PathEvents)) { Write-Ansi "Event data missing." $Palette.Error; return }
     $Data = Import-JsonFast $PathEvents
     $Groups = Get-UpcomingEvents -Sched $Data.schedule -Types $Data.eventTypes
