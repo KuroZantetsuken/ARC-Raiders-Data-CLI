@@ -10,7 +10,8 @@ I hate having to keep a browser open while playing just to look up trivial infor
 
 This tool searches the database maintained by [RaidTheory/arcraiders-data](https://github.com/RaidTheory/arcraiders-data) (the same data used by [arctracker.io](https://arctracker.io)).
 
-- **Search Almost Everything**: Returns information about:
+- **Fast Performance**: Uses a local cache for quick search results.
+- **Search Almost Everything**:
     - Quests
     - Items
     - Skill Nodes
@@ -23,7 +24,7 @@ This tool searches the database maintained by [RaidTheory/arcraiders-data](https
     - Stash space gained or lost compared to recipe requirements
 - **Event Schedule**: Displays upcoming map events in your local time, color-coded by map.
 - **Interactive Selection**: If multiple results are found, you can quickly select with number keys.
-- **Automatic Updates**: Built-in `arc update` command to keep the tool and data up to date.
+- **Automatic Updates**: Performs background checks and notifies you when new data or script updates are available.
 
 ## PowerToys Run
 My primary way of using this is with **PowerToys Run**. Depending on your setup, you can hit `ALT+SPACE` at any time and type `>arc <query>` to get results from anywhere.
@@ -74,7 +75,7 @@ If you installed from source using Git, you can update the game data separately:
 ```powershell
 git submodule update --remote
 ```
-For release builds, use `arc update` to update the entire tool including data. The tool also performs periodic background checks and will notify you when new game data or script updates are available.
+For release builds, use `arc update` to update the entire tool including data. The tool also performs periodic background checks and will notify you within the CLI when updates are available.
 
 ## Uninstallation
 
