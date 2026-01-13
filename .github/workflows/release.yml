@@ -44,6 +44,9 @@ jobs:
           find . -name "*.json" -exec cp --parents {} ../release/arcraiders-data/ \;
           cd ..
           
+          # Create .version file in data folder
+          git -C arcraiders-data rev-parse HEAD > release/arcraiders-data/.version
+          
           # Zip it up
           cd release
           zip -r ../arc-raiders-cli.zip .
