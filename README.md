@@ -74,7 +74,7 @@ If you installed from source using Git, you can update the game data separately:
 ```powershell
 git submodule update --remote
 ```
-For release builds, use `arc update` to update the entire tool including data.
+For release builds, use `arc update` to update the entire tool including data. The tool also performs periodic background checks and will notify you when new game data or script updates are available.
 
 ## Uninstallation
 
