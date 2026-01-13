@@ -240,7 +240,7 @@ function Get-WrappedText {
         [int]$Width = 55,
         [string]$Indent = " "
     )
-    if (-not $Text) { return @() }
+    if ([string]::IsNullOrWhiteSpace($Text)) { return @() }
     
     $Lines = @()
     # Sanitize newlines to ensure clean wrapping
@@ -571,7 +571,7 @@ function Initialize-Data {
             $Files = [System.IO.Directory]::GetFiles($PathItems, "*.json")
             foreach ($File in $Files) {
                 $J = Import-JsonFast $File
-                if ($J) { $Global:Data.Items[$J.id] = $J }
+                if ($J -and $null -ne $J.id) { $Global:Data.Items[$J.id] = $J }
             }
         }
         if (Test-Path $PathQuests) {
@@ -607,16 +607,19 @@ function Initialize-Data {
 
 function Get-ItemName {
     param ($Id)
-    $Item = $Global:Data.Items.$Id
-    if ($Item) { return $Item.name.en }
-    return $Id -replace "_", " " -replace "\b\w", { $args[0].Value.ToUpper() }
+    if ([string]::IsNullOrWhiteSpace($Id)) { return "" }
+    $Item = $Global:Data.Items."$Id"
+    if ($null -ne $Item -and $null -ne $Item.name -and $null -ne $Item.name.en) { return $Item.name.en }
+    $Str = [string]$Id
+    return $Str -replace "_", " " -replace "\b\w", { if ($args[0]) { $args[0].Value.ToUpper() } else { "" } }
 }
 
 function Get-ItemValue {
     param ($Id)
+    if ([string]::IsNullOrWhiteSpace($Id)) { return 0 }
     if ($Id -eq "coins" -or $Id -eq "creds") { return 1 }
-    $Item = $Global:Data.Items.$Id
-    if ($Item) { return [int]$Item.value }
+    $Item = $Global:Data.Items."$Id"
+    if ($null -ne $Item -and $null -ne $Item.value) { return [int]$Item.value }
     return 0
 }
 
@@ -886,6 +889,7 @@ function Show-Hideout {
 
 function Get-UpcomingEvents {
     param ($Sched, $Types)
+    if ($null -eq $Sched -or $null -eq $Types) { return @() }
     $BaseTime = [DateTime]::UtcNow.Date.AddHours([DateTime]::UtcNow.Hour)
     $NextEvents = @{}
     
@@ -895,8 +899,10 @@ function Get-UpcomingEvents {
         
         foreach ($MapKey in $Sched.PSObject.Properties.Name) {
             foreach ($Cat in @("major", "minor")) {
-                $Key = $Sched.$MapKey.$Cat."$Hour"
-                if ($Key -and $Types.$Key -and -not $Types.$Key.disabled) {
+                $Category = try { $Sched.$MapKey.$Cat } catch { $null }
+                if ($null -eq $Category) { continue }
+                $Key = $Category."$Hour"
+                if ($null -ne $Key -and $null -ne $Types.$Key -and -not $Types.$Key.disabled) {
                     $Name = $Types.$Key.displayName
                     if (-not $NextEvents.ContainsKey($Name)) {
                         $NextEvents[$Name] = [PSCustomObject]@{
