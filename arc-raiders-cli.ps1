@@ -443,6 +443,107 @@ function Confirm-Data {
     }
 }
 
+function Update-ArcRaidersCLI {
+    if ($CurrentVersion -eq "vDEV") {
+        Write-Ansi "Update is disabled in vDEV mode." $Palette.Warning
+        return
+    }
+
+    Write-Ansi "Starting system update..." $Palette.Accent
+    
+    # 1. Update Script
+    try {
+        $Repo = "KuroZantetsuken/ARC-Raiders-CLI"
+        $Url  = "https://api.github.com/repos/$Repo/releases/latest"
+        $Latest = Invoke-RestMethod -Uri $Url -ErrorAction Stop
+        
+        if ($Latest.tag_name -ne $CurrentVersion) {
+            Write-Ansi "Updating script to $($Latest.tag_name)..." $Palette.Accent
+            
+            $Asset = $Latest.assets | Where-Object { $_.name -like "*.zip" } | Select-Object -First 1
+            if ($Asset) {
+                # Display Changelog
+                if ($Latest.body) {
+                    $ChangelogLines = @()
+                    $RawLines = $Latest.body -split "`r?`n"
+                    $NoteIdx = -1
+                    for ($i = $RawLines.Count - 1; $i -ge 0; $i--) {
+                        if ($RawLines[$i] -like "*[!NOTE]*") { $NoteIdx = $i; break }
+                    }
+                    if ($NoteIdx -ne -1) { $RawLines = $RawLines[0..($NoteIdx - 1)] }
+                    foreach ($Line in $RawLines) {
+                        if ([string]::IsNullOrWhiteSpace($Line)) { $ChangelogLines += ""; continue }
+                        $ChangelogLines += Get-WrappedText -Text $Line -Indent " "
+                    }
+                    Show-Card -Title "RELEASE NOTES" -Content $ChangelogLines -ThemeColor $Palette.Accent -BorderColor $Palette.Border
+                }
+
+                $TempDir = Join-Path $RepoRoot ".update_tmp"
+                try {
+                    if (Test-Path $TempDir) { Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue }
+                    New-Item -Path $TempDir -ItemType Directory -Force | Out-Null
+                    
+                    $ZipPath = Join-Path $TempDir "update.zip"
+                    $ExtPath = Join-Path $TempDir "extracted"
+                    
+                    $Url = $Asset.browser_download_url
+                    if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+                        curl.exe -s -L -f -o "$ZipPath" "$Url"
+                    } else {
+                        Invoke-WebRequest -Uri $Url -OutFile $ZipPath -ErrorAction Stop
+                    }
+                    Expand-Archive -Path $ZipPath -DestinationPath $ExtPath -Force -ErrorAction Stop
+
+                    if (Test-Path (Join-Path $ExtPath "arc-raiders-cli.ps1")) {
+                        $BackupFile = Join-Path $RepoRoot "arc-raiders-cli.ps1.bak"
+                        Copy-Item -Path $PSCommandPath -Destination $BackupFile -Force
+                        
+                        try {
+                            $UpdateFiles = Get-ChildItem -Path $ExtPath -Recurse
+                            foreach ($File in $UpdateFiles) {
+                                $RelativePath = $File.FullName.Substring($ExtPath.Length + 1)
+                                $Dest = Join-Path $RepoRoot $RelativePath
+                                if ($File.PSIsContainer) {
+                                    if (-not (Test-Path $Dest)) { New-Item -Path $Dest -ItemType Directory -Force | Out-Null }
+                                } else {
+                                    if ($File.Name -eq ".cache" -or $File.Name -eq ".gitignore" -or $File.Name -eq ".gitmodules" -or $RelativePath.StartsWith("arcraiders-data")) {
+                                        continue
+                                    }
+                                    if (Test-Path $Dest) {
+                                        $TempFile = $Dest + ".old"
+                                        Move-Item -Path $Dest -Destination $TempFile -Force -ErrorAction SilentlyContinue
+                                        Copy-Item -Path $File.FullName -Destination $Dest -Force
+                                        Remove-Item $TempFile -Force -ErrorAction SilentlyContinue
+                                    } else {
+                                        Copy-Item -Path $File.FullName -Destination $Dest -Force
+                                    }
+                                }
+                            }
+                            Remove-Item $BackupFile -Force -ErrorAction SilentlyContinue
+                            Write-Ansi "Script update successful." $Palette.Success
+                        } catch {
+                            if (Test-Path $BackupFile) { Move-Item -Path $BackupFile -Destination $PSCommandPath -Force }
+                            throw $_
+                        }
+                    }
+                } finally {
+                    Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+        } else {
+            Write-Ansi "Script is already up to date ($CurrentVersion)." $Palette.Success
+        }
+    } catch {
+        Write-Ansi "Script update failed: $($_.Exception.Message)" $Palette.Error
+    }
+
+    # 2. Update Data
+    Update-Data
+    
+    Write-Ansi "`nUpdate process complete!" $Palette.Success
+    Write-Ansi "Please restart your terminal session." $Palette.Subtext
+}
+
 # -----------------------------------------------------------------------------
 # UI COMPONENTS
 # -----------------------------------------------------------------------------
@@ -503,7 +604,9 @@ function Show-Card {
     if ($Subtitle) {
         $SubLines = Get-WrappedText -Text $Subtitle -Width ($Width - 4) -Indent ""
         foreach ($SL in $SubLines) {
-            Write-ContentRow -Text $SL.Trim() -TextColor $Palette.Subtext -BorderColor $BorderColor -Width $Width
+            if ($null -ne $SL) {
+                Write-ContentRow -Text $SL.Trim() -TextColor $Palette.Subtext -BorderColor $BorderColor -Width $Width
+            }
         }
     }
     
@@ -519,137 +622,6 @@ function Show-Card {
     Write-BoxRow $Sym.Box.BL $Sym.Box.H $Sym.Box.BR $BorderColor $Width
 }
 
-
-function Update-ArcRaidersCLI {
-    Write-Ansi "Checking for updates..." $Palette.Accent
-    try {
-        $Repo = "KuroZantetsuken/ARC-Raiders-CLI"
-        $Url  = "https://api.github.com/repos/$Repo/releases/latest"
-        $Latest = Invoke-RestMethod -Uri $Url -ErrorAction Stop
-        
-        if ($Latest.tag_name -eq $CurrentVersion) {
-            Write-Ansi "You are already on the latest version ($CurrentVersion)." $Palette.Success
-            return
-        }
-
-        $Asset = $Latest.assets | Where-Object { $_.name -like "*.zip" } | Select-Object -First 1
-        if (-not $Asset) {
-            Write-Ansi "No zip asset found in the latest release." $Palette.Error
-            return
-        }
-
-        Write-Ansi "Updating to $($Latest.tag_name)..." $Palette.Accent
-
-        # Enable modern inline progress if supported (PowerShell 7.2+)
-        if ($PSVersionTable.PSVersion.Major -ge 7 -and $PSVersionTable.PSVersion.Minor -ge 2) {
-            $PSStyle.Formatting.ProgressStyle = 'Inline'
-        }
-        
-        # Display Changelog
-        if ($Latest.body) {
-            $ChangelogLines = @()
-            $RawLines = $Latest.body -split "`r?`n"
-            
-            # Robustly trim automated release notes and trailing whitespace
-            $NoteIdx = -1
-            for ($i = $RawLines.Count - 1; $i -ge 0; $i--) {
-                if ($RawLines[$i] -like "*[!NOTE]*") { $NoteIdx = $i; break }
-            }
-            if ($NoteIdx -ne -1) { $RawLines = $RawLines[0..($NoteIdx - 1)] }
-            while ($RawLines.Count -gt 0 -and [string]::IsNullOrWhiteSpace($RawLines[-1])) {
-                $RawLines = $RawLines[0..($RawLines.Count - 2)]
-            }
-
-            foreach ($Line in $RawLines) {
-                if ([string]::IsNullOrWhiteSpace($Line)) { $ChangelogLines += ""; continue }
-                $ChangelogLines += Get-WrappedText -Text $Line -Indent " "
-            }
-            # Limit changelog height if it's too long
-            if ($ChangelogLines.Count -gt 20) {
-                $ChangelogLines = $ChangelogLines[0..18] + @("---", " ... and more (see GitHub for full notes)")
-            }
-            Write-Ansi "`n$($Latest.html_url)" $Palette.Subtext
-            Show-Card -Title "RELEASE NOTES" -Content $ChangelogLines -ThemeColor $Palette.Accent -BorderColor $Palette.Border
-        }
-
-        # Use a local temp directory for reliability
-        $TempDir = Join-Path $RepoRoot ".update_tmp"
-        if (Test-Path $TempDir) { Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue }
-        New-Item -Path $TempDir -ItemType Directory -Force | Out-Null
-        
-        $ZipPath = Join-Path $TempDir "update.zip"
-        $ExtPath = Join-Path $TempDir "extracted"
-        
-        Write-Ansi "Downloading update..." $Palette.Subtext
-        Invoke-WebRequest -Uri $Asset.browser_download_url -OutFile $ZipPath -ErrorAction Stop
-        
-        Write-Ansi "Extracting files..." $Palette.Subtext
-        Expand-Archive -Path $ZipPath -DestinationPath $ExtPath -Force -ErrorAction Stop
-
-        # Verification: Check if extracted content looks correct before overwriting
-        if (-not (Test-Path (Join-Path $ExtPath "arc-raiders-cli.ps1"))) {
-            throw "Downloaded update is missing the main script file. Update aborted for safety."
-        }
-
-        Write-Ansi "Installing update to $RepoRoot..." $Palette.Subtext
-        
-        # 1. Create a backup of the current script for recovery if needed
-        $BackupFile = Join-Path $RepoRoot "arc-raiders-cli.ps1.bak"
-        Copy-Item -Path $PSCommandPath -Destination $BackupFile -Force
-
-        try {
-            # 2. Copy files individually to preserve the directory structure while protecting local files
-            $UpdateFiles = Get-ChildItem -Path $ExtPath -Recurse
-            foreach ($File in $UpdateFiles) {
-                $RelativePath = $File.FullName.Substring($ExtPath.Length + 1)
-                $Dest = Join-Path $RepoRoot $RelativePath
-                
-                if ($File.PSIsContainer) {
-                    if (-not (Test-Path $Dest)) { New-Item -Path $Dest -ItemType Directory -Force | Out-Null }
-                } else {
-                    # Skip files that should remain local (like .cache or .git)
-                    if ($File.Name -eq ".cache" -or $File.Name -eq ".gitignore" -or $File.Name -eq ".gitmodules") {
-                        continue
-                    }
-                    
-                    # Robust move/replace
-                    if (Test-Path $Dest) {
-                        # Move to temporary before replacing to avoid "file in use" issues in some environments
-                        $TempFile = $Dest + ".old"
-                        Move-Item -Path $Dest -Destination $TempFile -Force -ErrorAction SilentlyContinue
-                        Copy-Item -Path $File.FullName -Destination $Dest -Force
-                        Remove-Item $TempFile -Force -ErrorAction SilentlyContinue
-                    } else {
-                        Copy-Item -Path $File.FullName -Destination $Dest -Force
-                    }
-                }
-            }
-            # Remove backup on success
-            Remove-Item $BackupFile -Force -ErrorAction SilentlyContinue
-        } catch {
-            # Attempt recovery from backup if the main script was affected
-            if (-not (Test-Path $PSCommandPath) -and (Test-Path $BackupFile)) {
-                Move-Item -Path $BackupFile -Destination $PSCommandPath -Force
-            }
-            throw $_
-        }
-        
-        # Cleanup temp directory
-        Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue
-        
-        # Force cache wipe on next run
-        if (Test-Path $GlobalCache) { Remove-Item $GlobalCache -Force -ErrorAction SilentlyContinue }
-
-        Write-Ansi "Update complete! Version $($Latest.tag_name) is now installed." $Palette.Success
-        Write-Ansi "Please restart your terminal or session if you experience issues." $Palette.Subtext
-    } catch {
-        Write-Ansi "Update failed: $($_.Exception.Message)" $Palette.Error
-        if ($null -ne $TempDir -and (Test-Path $TempDir)) {
-            Write-Ansi "Cleanup: Removing temporary files..." $Palette.Subtext
-            Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue
-        }
-    }
-}
 
 # -----------------------------------------------------------------------------
 # DATA ENGINE
